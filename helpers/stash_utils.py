@@ -5,6 +5,7 @@ import config
 from datetime import datetime
 import os
 import threading
+from fnmatch import fnmatch
 
 # Initialize Stash connection with optional API key
 stash_config = {
@@ -21,6 +22,14 @@ stash = StashInterface(stash_config)
 
 # Thread-safe error logging
 error_log_lock = threading.Lock()
+
+def progress_safe_print(message):
+    """Print in a way that cooperates with active tqdm bars."""
+    try:
+        from tqdm import tqdm
+        tqdm.write(message)
+    except Exception:
+        print(message)
 
 def _rotate_log_if_needed():
     """Rotate error_log_path if it exceeds error_log_max_mb. Called inside error_log_lock."""
@@ -39,9 +48,9 @@ def log_scene_failure(scene_id, filename_pretty, step, error):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = f"{timestamp} ❌ Scene {scene_id} — {filename_pretty} failed during {step}: {error}"
     try:
-        print(msg)
+        progress_safe_print(msg)
     except UnicodeEncodeError:
-        print(msg.encode('utf-8', errors='replace').decode('ascii', errors='replace'))
+        progress_safe_print(msg.encode('utf-8', errors='replace').decode('ascii', errors='replace'))
 
 def reset_terminal():
     import platform
@@ -58,32 +67,52 @@ def reset_terminal():
         except:
             pass  # If stty fails, at least we reset colors/cursor
 
-def get_total_scene_count():
-    if config.excluded_paths:
-        # Need paths to filter — fetch all IDs+paths but only one field each
+def get_total_scene_count(include_hashing_tag=False):
+    """
+    Count scenes still pending phash generation.
+
+    Args:
+        include_hashing_tag (bool): When True, include scenes currently claimed with
+            hashing_tag so queue size reflects multi-node in-flight work.
+    """
+    excluded_tags = [config.hashing_error_tag, config.cover_error_tag]
+    if not include_hashing_tag:
+        excluded_tags.insert(0, config.hashing_tag)
+
+    query_filter = {
+        "phash": {"value": "", "modifier": "IS_NULL"},
+        "tags": {"value": excluded_tags, "modifier": "EXCLUDES"}
+    }
+
+    needs_path_filter = bool(config.excluded_paths or config.filemask)
+    if needs_path_filter:
+        # Need file paths to apply excluded_paths/filemask filters client-side.
         scenes = stash.find_scenes(
-            f={
-                "phash": {"value": "", "modifier": "IS_NULL"},
-                "tags": {"value": [config.hashing_tag, config.hashing_error_tag, config.cover_error_tag], "modifier": "EXCLUDES"}
-            },
+            f=query_filter,
             filter={"per_page": -1},
             fragment="id files{path}"
         )
-        return sum(
-            1 for s in scenes
-            if s.get('files') and not any(s['files'][0]['path'].startswith(ep) for ep in config.excluded_paths)
-        )
-    else:
-        count, _ = stash.find_scenes(
-            f={
-                "phash": {"value": "", "modifier": "IS_NULL"},
-                "tags": {"value": [config.hashing_tag, config.hashing_error_tag, config.cover_error_tag], "modifier": "EXCLUDES"}
-            },
-            filter={"per_page": 1},
-            fragment="id",
-            get_count=True
-        )
-        return count
+        total = 0
+        for scene in scenes:
+            files = scene.get('files') or []
+            if not files:
+                continue
+
+            file_path = files[0].get('path', '')
+            if config.excluded_paths and any(file_path.startswith(ep) for ep in config.excluded_paths):
+                continue
+            if config.filemask and not fnmatch(os.path.basename(file_path), config.filemask):
+                continue
+            total += 1
+        return total
+
+    count, _ = stash.find_scenes(
+        f=query_filter,
+        filter={"per_page": 1},
+        fragment="id",
+        get_count=True
+    )
+    return count
 
 def tag_scene_error(scene_id, error_tag, error_msg=None):
     if config.dry_run:
@@ -189,9 +218,9 @@ def log_marker_failure(marker_id, marker_title, step, error):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = f"{timestamp} ❌ Marker {marker_id} — {marker_title} failed during {step}: {error}"
     try:
-        print(msg)
+        progress_safe_print(msg)
     except UnicodeEncodeError:
-        print(msg.encode('utf-8', errors='replace').decode('ascii', errors='replace'))
+        progress_safe_print(msg.encode('utf-8', errors='replace').decode('ascii', errors='replace'))
 
     # Thread-safe error logging
     try:

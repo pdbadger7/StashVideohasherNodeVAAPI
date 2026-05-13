@@ -345,6 +345,7 @@ Other useful options:
         clear_error_tags,
         get_hashing_scenes,
         clear_hashing_tags,
+        progress_safe_print,
         reset_terminal,
     )
     from helpers.health_check import run_health_check
@@ -471,9 +472,35 @@ Other useful options:
 
     # Standalone generation modes (process and exit, don't enter main loop)
     standalone_mode = args.standalone_sprites or args.standalone_previews or args.standalone_markers
+    from tqdm import tqdm
+
+    overall_progress = None
+    last_pending_count = None
+    if not standalone_mode and not args.retry_errors:
+        initial_pending = get_total_scene_count(include_hashing_tag=True)
+        overall_progress = tqdm(
+            total=initial_pending,
+            desc="🌐 Overall Progress",
+            unit="scene",
+            leave=True,
+            dynamic_ncols=True,
+            position=0,
+        )
+        overall_progress.set_postfix_str(f"remaining: {initial_pending}")
+        last_pending_count = initial_pending
+
+    batch_progress = None
+    if not standalone_mode:
+        batch_progress = tqdm(
+            total=0,
+            desc="📦 Processing Batch",
+            unit="scene",
+            leave=True,
+            dynamic_ncols=True,
+            position=1 if overall_progress else 0,
+        )
 
     if standalone_mode:
-        from tqdm import tqdm
 
         while True:
             if shutdown_requested:
@@ -646,21 +673,29 @@ Other useful options:
 
     while True:
         if shutdown_requested:
-            print("🛑 Shutdown requested. Exiting...")
+            progress_safe_print("🛑 Shutdown requested. Exiting...")
             clean_temp_dirs(recreate=False)
             reset_terminal()
+            if batch_progress:
+                batch_progress.close()
+            if overall_progress:
+                overall_progress.close()
             break
 
         clean_temp_dirs()
 
         # Get scenes to process (retry errors or normal discovery)
         if args.retry_errors:
-            print("🔄 Fetching scenes with error tags for retry...")
+            progress_safe_print("🔄 Fetching scenes with error tags for retry...")
             scenes = get_error_scenes()
             if not scenes:
-                print("✅ No error scenes to retry. Exiting.")
+                progress_safe_print("✅ No error scenes to retry. Exiting.")
                 clean_temp_dirs(recreate=False)
                 reset_terminal()
+                if batch_progress:
+                    batch_progress.close()
+                if overall_progress:
+                    overall_progress.close()
                 break
             # Clear error tags so they can be reprocessed
             scene_ids = [s['id'] for s in scenes]
@@ -669,15 +704,20 @@ Other useful options:
             scenes = discover_scenes()
 
         if not scenes:
-            print("✅ No scenes to process. Exiting.")
-            print("🧹 Cleaning up temporary directories...")
+            progress_safe_print("✅ No scenes to process. Exiting.")
+            progress_safe_print("🧹 Cleaning up temporary directories...")
             clean_temp_dirs(recreate=False)
             reset_terminal()
+            if batch_progress:
+                batch_progress.close()
+            if overall_progress:
+                overall_progress.close()
             break
 
         total_batch = len(scenes)
-        total_database = get_total_scene_count()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎯 Selected page with {total_batch} scenes (out of {total_database} total)")
+        if config.verbose:
+            total_database = get_total_scene_count()
+            progress_safe_print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎯 Selected page with {total_batch} scenes (out of {total_database} total)")
 
         # Initialize statistics tracking
         batch_stats.start_batch(total_batch)
@@ -689,18 +729,14 @@ Other useful options:
             for index, scene in enumerate(scenes, start=1):
                 futures.append(executor.submit(process_scene, scene, index, total_batch, vaapi_supported, vaapi_device, videotoolbox_supported))
 
-            # Progress bar for batch completion
-            if config.verbose:
-                from tqdm import tqdm
-                print()  # Blank line before progress bar
-                iterator = tqdm(futures, desc="📦 Processing Batch", unit="scene", total=len(futures),
-                               leave=True, dynamic_ncols=True, position=0)
-            else:
-                iterator = futures
+            # Reuse one sticky batch progress bar across all batches.
+            if batch_progress:
+                batch_progress.reset(total=len(futures))
+                batch_progress.refresh()
 
-            for future in iterator:
+            for future in futures:
                 if shutdown_requested:
-                    print("\n🛑 Shutdown requested. Cancelling remaining scenes...")
+                    progress_safe_print("🛑 Shutdown requested. Cancelling remaining scenes...")
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
 
@@ -711,37 +747,68 @@ Other useful options:
                     else:
                         batch_stats.record_failure()
                 except TimeoutError:
-                    print(f"⚠️ Scene processing timed out after 10 minutes")
+                    progress_safe_print("⚠️ Scene processing timed out after 10 minutes")
                     batch_stats.record_failure()
                 except Exception as e:
-                    print(f"⚠️ Worker thread error: {e}")
+                    progress_safe_print(f"⚠️ Worker thread error: {e}")
                     batch_stats.record_failure()
+                finally:
+                    if batch_progress:
+                        batch_progress.update(1)
 
-            # Print statistics summary
-            print(batch_stats.get_summary())
+            # Batch statistics summary remains part of detailed/verbose output
+            if config.verbose:
+                progress_safe_print(batch_stats.get_summary())
+
+            if overall_progress:
+                current_pending = get_total_scene_count(include_hashing_tag=True)
+                if last_pending_count is None:
+                    last_pending_count = current_pending
+
+                completed_since_last = max(0, last_pending_count - current_pending)
+                if completed_since_last:
+                    overall_progress.update(completed_since_last)
+
+                # Keep total dynamic to reflect API-observed queue size across nodes.
+                overall_progress.total = max(overall_progress.n, overall_progress.n + current_pending)
+                overall_progress.set_postfix_str(f"remaining: {current_pending}")
+                overall_progress.refresh()
+                last_pending_count = current_pending
 
         except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user. Shutting down gracefully...")
+            progress_safe_print("🛑 Interrupted by user. Shutting down gracefully...")
             if executor:
                 executor.shutdown(wait=False, cancel_futures=True)
-            print("🧹 Cleaning up temporary directories...")
+            progress_safe_print("🧹 Cleaning up temporary directories...")
             clean_temp_dirs(recreate=False)
             reset_terminal()
+            if batch_progress:
+                batch_progress.close()
+            if overall_progress:
+                overall_progress.close()
             break
         finally:
             if executor:
                 executor.shutdown(wait=True)
 
         if config.once:
-            print("✅ Finished single batch. Exiting due to --once flag.")
-            print("🧹 Cleaning up temporary directories...")
+            progress_safe_print("✅ Finished single batch. Exiting due to --once flag.")
+            progress_safe_print("🧹 Cleaning up temporary directories...")
             clean_temp_dirs(recreate=False)
             reset_terminal()
+            if batch_progress:
+                batch_progress.close()
+            if overall_progress:
+                overall_progress.close()
             break
 
         if config.batch_sleep > 0:
-            print(f"⏳ Waiting {config.batch_sleep}s before next batch... Press Ctrl+C to cancel.")
+            progress_safe_print(f"⏳ Waiting {config.batch_sleep}s before next batch... Press Ctrl+C to cancel.")
             if shutdown_event.wait(timeout=config.batch_sleep):
+                if batch_progress:
+                    batch_progress.close()
+                if overall_progress:
+                    overall_progress.close()
                 break
 
 if __name__ == '__main__':

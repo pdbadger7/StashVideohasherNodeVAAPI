@@ -33,17 +33,25 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
     if not scene.get('files'):
         return {'success': False, 'elapsed_time': 0, 'scene_id': scene.get('id')}
     file_id = scene['files'][0]['id']
-    filename = scene['files'][0]['path']
+    original_filename = scene['files'][0]['path']
+    filename = original_filename
     filename_pretty = os.path.basename(filename)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if index and total_batch:
-        print(f"[{timestamp}] 📦 Scene #{index} of {total_batch}: ID {scene_id} — {filename_pretty}")
-    else:
-        print(f"[{timestamp}] 📦 Processing scene: ID {scene_id} — {filename_pretty}")
+    if config.verbose:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if index and total_batch:
+            print(f"[{timestamp}] 📦 Scene #{index} of {total_batch}: ID {scene_id} — {filename_pretty}")
+        else:
+            print(f"[{timestamp}] 📦 Processing scene: ID {scene_id} — {filename_pretty}")
 
     for t in config.translations:
-        filename = filename.replace(t['orig'], t['local'], 1)
+        orig = t.get('orig')
+        local = t.get('local')
+        if not isinstance(orig, str) or not isinstance(local, str):
+            continue
+        if filename.startswith(orig):
+            filename = filename.replace(orig, local, 1)
+            break
 
     filehash = ""
     for fp in scene['files'][0].get('fingerprints', []):
@@ -63,8 +71,9 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔍 Translated path: {filename}")
 
     if not file_exists:
-        log_scene_failure(scene_id, filename_pretty, "file check", "File not found after translation")
-        tag_scene_error(scene_id, config.hashing_error_tag, "File not found after translation")
+        error_detail = f"File not found after translation (stash='{original_filename}', translated='{filename}')"
+        log_scene_failure(scene_id, filename_pretty, "file check", error_detail)
+        tag_scene_error(scene_id, config.hashing_error_tag, error_detail)
         elapsed = time.time() - start_time
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 

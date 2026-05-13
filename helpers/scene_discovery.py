@@ -3,7 +3,7 @@
 import random
 import os
 from fnmatch import fnmatch
-from helpers.stash_utils import stash
+from helpers.stash_utils import stash, progress_safe_print
 import config
 
 def discover_scenes():
@@ -38,7 +38,8 @@ def discover_scenes():
     # Step 4: Randomly select one page to process
     # This helps distribute work across multiple systems without overlap
     selected_page = random.randint(1, total_pages)
-    print(f"🎯 Selected page {selected_page} of {total_pages} (batch size: {config.per_page}, total: {total_count})")
+    if config.verbose:
+        progress_safe_print(f"🎯 Selected page {selected_page} of {total_pages} (batch size: {config.per_page}, total: {total_count})")
 
     # Step 5: Fetch the selected page of scenes with full metadata
     # These scenes will be claimed and processed by this node
@@ -64,8 +65,8 @@ def discover_scenes():
             if s.get('files') and not any(s['files'][0]['path'].startswith(ep) for ep in config.excluded_paths)
         ]
         excluded = before - len(batch_scenes)
-        if excluded:
-            print(f"🚫 Excluded {excluded} scene(s) matching excluded_paths")
+        if excluded and config.verbose:
+            progress_safe_print(f"🚫 Excluded {excluded} scene(s) matching excluded_paths")
 
     # Step 7: Apply filemask filter if specified
     if config.filemask:
@@ -79,10 +80,11 @@ def discover_scenes():
                     filtered_scenes.append(scene)
                     break  # Only need one matching file per scene
 
-        if filtered_scenes:
-            print(f"🔍 Filemask '{config.filemask}' matched {len(filtered_scenes)} of {len(batch_scenes)} scenes")
-        else:
-            print(f"⚠️ Filemask '{config.filemask}' matched 0 scenes in this batch")
+        if config.verbose:
+            if filtered_scenes:
+                progress_safe_print(f"🔍 Filemask '{config.filemask}' matched {len(filtered_scenes)} of {len(batch_scenes)} scenes")
+            else:
+                progress_safe_print(f"⚠️ Filemask '{config.filemask}' matched 0 scenes in this batch")
 
         return filtered_scenes
 

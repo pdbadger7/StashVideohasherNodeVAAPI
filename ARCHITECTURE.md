@@ -705,12 +705,10 @@ T4      ...                   process scene 1 ← Duplicate work
 ### Error Tagging Strategy
 
 ```python
-# Processing tag (temporary)
-hashing_tag = 15015          # "Currently processing"
-
-# Error tags (permanent until fixed)
-hashing_error_tag = 15018    # "Phash/sprite/preview failed"
-cover_error_tag = 15019      # "Cover extraction failed"
+# Runtime placeholders (auto-filled from Stash at startup)
+hashing_tag = 0              # "Currently processing"
+hashing_error_tag = 0        # "Phash/sprite/preview failed"
+cover_error_tag = 0          # "Cover extraction failed"
 ```
 
 **Error State Machine:**

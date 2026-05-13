@@ -23,9 +23,9 @@ marker_path: /mnt/stash/stash/generated
 
 excluded_paths: []
 
-hashing_tag: 15015
-hashing_error_tag: 15018
-cover_error_tag: 15019
+hashing_tag: 0
+hashing_error_tag: 0
+cover_error_tag: 0
 
 translations: []
 

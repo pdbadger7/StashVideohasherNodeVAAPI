@@ -132,7 +132,7 @@ marker_path: /mnt/stash/generated
 ### 3. Add your tag IDs
 
 The script uses Stash tags to track which scenes are in-progress and which had errors.
-If these are missing (`0`/unset), startup now auto-fills them by fetching existing tags from Stash and creating missing ones.
+At startup it resolves these by tag name from Stash (creating only when missing), updates in-memory IDs, and persists the resolved IDs back to your config file.
 
 ```yaml
 hashing_tag: 0
