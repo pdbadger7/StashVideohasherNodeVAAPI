@@ -70,12 +70,13 @@ uvx --from StashVideoHasherNode stash-videohasher --health-check
 ## Docker (x86 + ARM64)
 
 This repo now includes a `Dockerfile` that builds on both `linux/amd64` and `linux/arm64`.
+Docker image repository names must be lowercase, so the published image uses `stashvideohashernode`.
 
 ### Build
 
 ```bash
-docker buildx build --platform linux/amd64 -t StashVideoHasherNode:amd64 .
-docker buildx build --platform linux/arm64 -t StashVideoHasherNode:arm64 .
+docker buildx build --platform linux/amd64 -t stashvideohashernode:amd64 .
+docker buildx build --platform linux/arm64 -t stashvideohashernode:arm64 .
 ```
 
 ### Run with VAAPI (Intel/AMD on Linux x86 host)
@@ -85,7 +86,7 @@ docker run --rm -it \
   --device /dev/dri:/dev/dri \
   -v "$(pwd)/config.py:/app/config.py:ro" \
   -v /mnt/stash:/mnt/stash \
-  StashVideoHasherNode:amd64 --health-check
+  stashvideohashernode:amd64 --health-check
 ```
 
 ### Apple M-Series note

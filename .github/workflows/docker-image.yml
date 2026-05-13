@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/StashVideoHasherNode"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/stashvideohashernode"
           year="$(date -u +%Y)"
           year_month="$(date -u +%Y.%m)"
           year_month_day="$(date -u +%Y.%m.%d)"
