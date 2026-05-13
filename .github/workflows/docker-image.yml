@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    paths:
+      - pyproject.toml
   workflow_dispatch:
 
 permissions:
@@ -11,52 +13,7 @@ permissions:
   packages: write
 
 jobs:
-  detect-version-change:
-    runs-on: ubuntu-latest
-    outputs:
-      version_changed: ${{ steps.detect.outputs.version_changed }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Detect version change
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "version_changed=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          before_sha="${{ github.event.before }}"
-          zero_sha="0000000000000000000000000000000000000000"
-
-          if [[ "${before_sha}" == "${zero_sha}" ]]; then
-            echo "version_changed=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if ! git show "${before_sha}:pyproject.toml" > /tmp/pyproject.old 2>/dev/null; then
-            echo "version_changed=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          cp pyproject.toml /tmp/pyproject.new
-          equal_line="$(python scripts/version_utils.py equal --old-file /tmp/pyproject.old --new-file /tmp/pyproject.new)"
-
-          if [[ "${equal_line}" == "equal=true" ]]; then
-            echo "version_changed=false" >> "${GITHUB_OUTPUT}"
-          else
-            echo "version_changed=true" >> "${GITHUB_OUTPUT}"
-          fi
-
   build-and-push:
-    needs: detect-version-change
-    if: github.event_name == 'workflow_dispatch' || needs.detect-version-change.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
