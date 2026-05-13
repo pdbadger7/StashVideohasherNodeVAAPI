@@ -58,8 +58,8 @@ stash-videohasher --health-check
 After the package is published to PyPI, you can install/run it without cloning this repo:
 
 ```bash
-uv tool install stash-videohasher-node-vaapi
-uvx --from stash-videohasher-node-vaapi stash-videohasher --health-check
+uv tool install StashVideoHasherNode
+uvx --from StashVideoHasherNode stash-videohasher --health-check
 ```
 
 ---
