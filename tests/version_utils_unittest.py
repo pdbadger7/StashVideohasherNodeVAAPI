@@ -1,15 +1,15 @@
 import unittest
 
 from scripts.version_utils import (
-    bump_minor_version,
+    bump_patch_version,
     extract_project_version,
     replace_project_version,
 )
 
 
 class VersionUtilsTests(unittest.TestCase):
-    def test_bump_minor_version_resets_patch(self):
-        self.assertEqual(bump_minor_version("0.1.7"), "0.2.0")
+    def test_bump_patch_version_increments_patch(self):
+        self.assertEqual(bump_patch_version("0.1.7"), "0.1.8")
 
     def test_extract_project_version(self):
         content = """

@@ -46,12 +46,12 @@ jobs:
             echo "should_bump=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Bump minor version
+      - name: Bump patch version
         if: steps.detect.outputs.should_bump == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/version_utils.py bump-minor --file pyproject.toml
+          python scripts/version_utils.py bump-patch --file pyproject.toml
 
       - name: Commit and push bump
         if: steps.detect.outputs.should_bump == 'true'

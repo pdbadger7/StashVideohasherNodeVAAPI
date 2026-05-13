@@ -9,12 +9,12 @@ PROJECT_BLOCK_RE = re.compile(r"(?ms)^\[project\]\n(.*?)(?:^\[|\Z)")
 VERSION_LINE_RE = re.compile(r'(?m)^version\s*=\s*"(\d+\.\d+\.\d+)"\s*$')
 
 
-def bump_minor_version(version):
+def bump_patch_version(version):
     match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version.strip())
     if not match:
         raise ValueError(f"Invalid version format: {version!r}")
-    major, minor, _patch = (int(part) for part in match.groups())
-    return f"{major}.{minor + 1}.0"
+    major, minor, patch = (int(part) for part in match.groups())
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def extract_project_version(content):
@@ -43,7 +43,7 @@ def replace_project_version(content, new_version):
 def bump_file(path):
     original = Path(path).read_text(encoding="utf-8")
     current = extract_project_version(original)
-    bumped = bump_minor_version(current)
+    bumped = bump_patch_version(current)
     updated = replace_project_version(original, bumped)
     Path(path).write_text(updated, encoding="utf-8")
     return current, bumped
@@ -57,7 +57,7 @@ def _build_parser():
     parser = argparse.ArgumentParser(description="Utilities for pyproject version detection and bumps.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    bump = sub.add_parser("bump-minor", help="Bump minor version in a pyproject.toml file")
+    bump = sub.add_parser("bump-patch", help="Bump patch version in a pyproject.toml file")
     bump.add_argument("--file", required=True, help="Path to pyproject.toml")
 
     equal_cmd = sub.add_parser("equal", help="Check whether two pyproject contents have the same version")
@@ -71,7 +71,7 @@ def main(argv=None):
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "bump-minor":
+    if args.command == "bump-patch":
         previous, bumped = bump_file(args.file)
         print(f"old_version={previous}")
         print(f"new_version={bumped}")
