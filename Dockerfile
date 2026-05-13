@@ -34,6 +34,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
 WORKDIR /app
 
+# Install dependency graph first to maximize layer cache hits when source changes.
+COPY pyproject.toml uv.lock README.md /app/
+RUN uv sync --frozen --no-dev --no-install-project
+
 COPY . /app
 
 RUN uv sync --frozen --no-dev
