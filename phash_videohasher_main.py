@@ -44,6 +44,13 @@ def apply_cli_args(args):
         config.filemask = args.filemask
     if args.nvenc:
         config.nvenc = True
+    if args.videotoolbox:
+        config.videotoolbox = True
+    if args.novideotoolbox:
+        config.videotoolbox = False
+    if args.videotoolbox_codec:
+        # argparse choices gate valid values; keep normalized value in config for downstream helpers
+        config.videotoolbox_codec = 'hevc' if args.videotoolbox_codec == 'h265' else args.videotoolbox_codec
     if args.hw_priority:
         config.hw_priority = args.hw_priority
     # VAAPI CLI overrides (take precedence over config.vaapi)
@@ -136,7 +143,7 @@ def process_sprite(scene_data, index, total, vaapi_supported, vaapi_device):
         log_scene_failure(scene_id, scene_title, "sprite generation", str(e))
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
-def process_preview(scene_data, index, total, vaapi_supported, vaapi_device):
+def process_preview(scene_data, index, total, vaapi_supported, vaapi_device, videotoolbox_supported):
     """Process a single preview for standalone mode."""
     import time
     from datetime import datetime
@@ -162,7 +169,9 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device):
             skip_seconds=config.preview_skip_seconds,
             include_audio=config.preview_audio,
             scene_id=scene_id, scene_name=scene_title,
-            use_vaapi=vaapi_supported, vaapi_device=vaapi_device
+            use_vaapi=vaapi_supported, vaapi_device=vaapi_device,
+            use_videotoolbox=videotoolbox_supported,
+            videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
         )
         generator.generate_preview()
         elapsed = time.time() - start_time
@@ -176,7 +185,7 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device):
         log_scene_failure(scene_id, scene_title, "preview generation", str(e))
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
-def process_marker(marker_data, index, total, vaapi_supported, vaapi_device):
+def process_marker(marker_data, index, total, vaapi_supported, vaapi_device, videotoolbox_supported):
     """Process a single marker for standalone mode."""
     import time
     from datetime import datetime
@@ -204,7 +213,9 @@ def process_marker(marker_data, index, total, vaapi_supported, vaapi_device):
             thumbnail_duration=config.marker_thumbnail_duration,
             thumbnail_fps=config.marker_thumbnail_fps,
             use_vaapi=vaapi_supported,
-            vaapi_device=vaapi_device
+            vaapi_device=vaapi_device,
+            use_videotoolbox=videotoolbox_supported,
+            videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
         )
 
         result = generator.generate_marker()
@@ -275,6 +286,7 @@ Other useful options:
     basic.add_argument("--debug", action="store_true", help="Enable debug output including step notifications and ffmpeg commands")
     basic.add_argument("--once", action="store_true", help="Run a single batch and exit (don't loop)")
     basic.add_argument("--filemask", type=str, help="Filter scenes by filename pattern (e.g., 'JoonMali*' or '*.mp4')")
+    basic.add_argument("--no-auto-setup", action="store_true", help="Disable startup autofill for missing tag IDs and translations")
 
     # Integrated scene processing
     integrated = parser.add_argument_group('Integrated Scene Processing', 'Enable media generation during scene processing')
@@ -302,6 +314,13 @@ Other useful options:
     hardware.add_argument("--vaapi", action="store_true", help="Force VAAPI hardware acceleration on (overrides config.vaapi)")
     hardware.add_argument("--novaapi", action="store_true", help="Force VAAPI off (overrides config.vaapi)")
     hardware.add_argument("--nvenc", action="store_true", help="Enable NVIDIA NVENC hardware encoder (overrides config.nvenc)")
+    hardware.add_argument("--videotoolbox", action="store_true", help="Enable Apple VideoToolbox encoder (macOS only; scene/marker MP4 previews)")
+    hardware.add_argument("--novideotoolbox", action="store_true", help="Disable VideoToolbox encoder (overrides config.videotoolbox)")
+    hardware.add_argument(
+        "--videotoolbox-codec",
+        choices=["h264", "hevc", "h265"],
+        help="VideoToolbox codec for MP4 previews: h264 (default) or hevc/h265",
+    )
     hardware.add_argument("--hw-priority", choices=["vaapi", "nvenc"], help="Which encoder takes precedence when both are available (overrides config.hw_priority)")
 
     # Utilities
@@ -318,12 +337,30 @@ Other useful options:
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
 
+    if not args.no_auto_setup:
+        from helpers.setup_autofill import autofill_missing_setup
+        autofill_missing_setup(verbose=config.verbose)
+
     # Hardware encoder resolution (evaluated once at startup)
     from datetime import datetime
     from helpers.vaapi_utils import vaapi_available
+    from helpers.videotoolbox_utils import is_videotoolbox_available, normalize_videotoolbox_codec
 
     # Step 1: Auto-detect VAAPI
     vaapi_supported, vaapi_device = vaapi_available() if not config.windows else (False, None)
+    videotoolbox_supported = False
+    videotoolbox_codec = normalize_videotoolbox_codec(getattr(config, 'videotoolbox_codec', 'h264'))
+    config.videotoolbox_codec = videotoolbox_codec
+
+    # Step 1b: Detect VideoToolbox only when requested
+    if config.videotoolbox:
+        videotoolbox_supported = is_videotoolbox_available(config.ffmpeg, videotoolbox_codec)
+        if videotoolbox_supported:
+            if config.verbose:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 VideoToolbox detected ({videotoolbox_codec}).")
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ⚠️ VideoToolbox ({videotoolbox_codec}) requested but unavailable; falling back to software for MP4 preview encoding.")
+            config.videotoolbox = False
 
     # Step 2: Apply CLI overrides — highest precedence
     vaapi_override = getattr(config, 'vaapi_override', None)
@@ -365,13 +402,19 @@ Other useful options:
             encoder = f"VAAPI ({vaapi_device})"
         elif config.nvenc:
             encoder = "NVENC"
+        elif videotoolbox_supported:
+            encoder = f"VideoToolbox ({videotoolbox_codec})"
         else:
             encoder = "software (libx264)"
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🎬 Hardware encoder: {encoder}")
 
     # Handle special CLI commands
     if args.health_check:
-        passed, results = run_health_check(vaapi_device if vaapi_supported else None)
+        passed, results = run_health_check(
+            vaapi_device if vaapi_supported else None,
+            videotoolbox_supported,
+            videotoolbox_codec,
+        )
         sys.exit(0 if passed else 1)
 
     if args.clear_error_tags:
@@ -400,7 +443,11 @@ Other useful options:
 
     # Run health checks before processing (unless disabled)
     if not config.dry_run:
-        passed, results = run_health_check(vaapi_device if vaapi_supported else None)
+        passed, results = run_health_check(
+            vaapi_device if vaapi_supported else None,
+            videotoolbox_supported,
+            videotoolbox_codec,
+        )
         if not passed:
             print("❌ Health checks failed. Aborting. Use --health-check to diagnose.")
             sys.exit(1)
@@ -476,7 +523,7 @@ Other useful options:
                     executor = ThreadPoolExecutor(max_workers=config.max_workers)
                     try:
                         futures = [executor.submit(process_preview, scene_data, idx, len(missing_previews),
-                                                  vaapi_supported, vaapi_device)
+                                                  vaapi_supported, vaapi_device, videotoolbox_supported)
                                   for idx, scene_data in enumerate(missing_previews, 1)]
 
                         if config.verbose:
@@ -520,7 +567,7 @@ Other useful options:
                     try:
                         executor = ThreadPoolExecutor(max_workers=config.max_workers)
                         futures = [executor.submit(process_marker, marker_data, idx, len(missing_markers),
-                                                  vaapi_supported, vaapi_device)
+                                                  vaapi_supported, vaapi_device, videotoolbox_supported)
                                   for idx, marker_data in enumerate(missing_markers, 1)]
 
                         if config.verbose:
@@ -623,7 +670,7 @@ Other useful options:
             executor = ThreadPoolExecutor(max_workers=config.max_workers)
             futures = []
             for index, scene in enumerate(scenes, start=1):
-                futures.append(executor.submit(process_scene, scene, index, total_batch, vaapi_supported, vaapi_device))
+                futures.append(executor.submit(process_scene, scene, index, total_batch, vaapi_supported, vaapi_device, videotoolbox_supported))
 
             # Progress bar for batch completion
             if config.verbose:

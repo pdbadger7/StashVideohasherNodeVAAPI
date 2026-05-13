@@ -1,0 +1,13 @@
+.git
+.github
+__pycache__/
+.tmp/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+*.log
+error_log.txt
+benchmarking/
+tests/
+config.py

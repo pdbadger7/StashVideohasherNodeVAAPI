@@ -8,11 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from config import verbose, nvenc, max_workers
 import time
 from datetime import datetime
+from helpers.videotoolbox_utils import get_videotoolbox_encoder, normalize_videotoolbox_codec
 
 class PreviewVideoGenerator:
     def __init__(self, filename, output_path, filehash, ffmpeg='ffmpeg', ffprobe='ffprobe',
                  preview_clips=15, clip_length=1, skip_seconds=0, include_audio=True,
-                 scene_id=None, scene_name=None, use_vaapi=None, vaapi_device=None):
+                 scene_id=None, scene_name=None, use_vaapi=None, vaapi_device=None,
+                 use_videotoolbox=None, videotoolbox_codec='h264'):
         self.filename = os.path.abspath(filename.strip('"').strip("'"))
         self.output_path = os.path.abspath(output_path)
         self.temp_dir = os.path.abspath(os.path.join(".tmp", f"preview_temp_{filehash}"))
@@ -26,6 +28,9 @@ class PreviewVideoGenerator:
         self.scene_name = scene_name
         self.use_vaapi = use_vaapi
         self.vaapi_device = vaapi_device
+        self.use_videotoolbox = use_videotoolbox
+        self.videotoolbox_codec = normalize_videotoolbox_codec(videotoolbox_codec)
+        self.videotoolbox_encoder = get_videotoolbox_encoder(self.videotoolbox_codec)
 
     def get_video_duration(self):
         result = subprocess.run(
@@ -49,10 +54,12 @@ class PreviewVideoGenerator:
         video_duration = self.get_video_duration()
         start_times = self.get_start_times(video_duration)
         use_vaapi = bool(self.use_vaapi) and bool(self.vaapi_device)
+        use_videotoolbox = bool(self.use_videotoolbox)
 
         def extract_clip(i, start_time):
             clip_file = os.path.join(self.temp_dir, f"clip_{i:03d}.mp4")
             audio_args = ['-c:a', 'aac', '-b:a', '192k'] if self.include_audio else ['-an']
+            clip_uses_videotoolbox = False
             if use_vaapi:
                 command = [self.ffmpeg,
                     '-vaapi_device', self.vaapi_device,
@@ -73,6 +80,16 @@ class PreviewVideoGenerator:
                     '-cq:v', '18',
                     '-preset', 'p4',
                 ] + audio_args + ['-y', '-loglevel', 'quiet', clip_file]
+            elif use_videotoolbox:
+                clip_uses_videotoolbox = True
+                command = [self.ffmpeg,
+                    '-ss', str(start_time),
+                    '-i', self.filename,
+                    '-t', str(self.clip_length),
+                    '-vf', 'scale=640:360',
+                    '-c:v', self.videotoolbox_encoder,
+                    '-b:v', '2500k',
+                ] + audio_args + ['-y', '-loglevel', 'quiet', clip_file]
             else:
                 command = [self.ffmpeg,
                     '-ss', str(start_time),
@@ -86,6 +103,25 @@ class PreviewVideoGenerator:
             try:
                 subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except subprocess.CalledProcessError as e:
+                if clip_uses_videotoolbox:
+                    print(f"⚠️ VideoToolbox ({self.videotoolbox_encoder}) failed for clip {i}; falling back to software (libx264).")
+                    fallback_command = [self.ffmpeg,
+                        '-ss', str(start_time),
+                        '-i', self.filename,
+                        '-t', str(self.clip_length),
+                        '-s', '640x360',
+                        '-c:v', 'libx264',
+                        '-crf', '18',
+                        '-preset', 'slow',
+                    ] + audio_args + ['-y', '-loglevel', 'quiet', clip_file]
+                    try:
+                        subprocess.run(fallback_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        return clip_file
+                    except subprocess.CalledProcessError as fallback_error:
+                        fallback_stderr = fallback_error.stderr.decode('utf-8', errors='replace').strip().splitlines()
+                        fallback_detail = fallback_stderr[-1] if fallback_stderr else str(fallback_error)
+                        print(f"❌ Software fallback failed for clip {i} for scene {self.scene_id} — {self.scene_name}: {fallback_detail}")
+                        return None
                 stderr = e.stderr.decode('utf-8', errors='replace').strip().splitlines()
                 detail = stderr[-1] if stderr else str(e)
                 print(f"❌ Failed to generate clip {i} for scene {self.scene_id} — {self.scene_name}: {detail}")
@@ -124,7 +160,9 @@ class PreviewVideoGenerator:
                 f.write(f"file '{safe_path}'\n")
 
         use_vaapi = bool(self.use_vaapi) and bool(self.vaapi_device)
+        use_videotoolbox = bool(self.use_videotoolbox)
         audio_args = ['-c:a', 'aac', '-b:a', '192k'] if self.include_audio else ['-an']
+        concat_uses_videotoolbox = False
 
         command = [self.ffmpeg]
         if use_vaapi:
@@ -149,6 +187,17 @@ class PreviewVideoGenerator:
                 '-cq:v', '18',
                 '-preset', 'p4',
             ])
+        elif use_videotoolbox:
+            concat_uses_videotoolbox = True
+            # VideoToolbox (Apple Silicon/macOS) pipeline
+            command.extend([
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_file,
+                '-vf', "scale=640:360",
+                '-c:v', self.videotoolbox_encoder,
+                '-b:v', '2500k',
+            ])
         else:
             # Software encoding pipeline
             command.extend([
@@ -166,6 +215,26 @@ class PreviewVideoGenerator:
         try:
             subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
         except subprocess.CalledProcessError as e:
+            if concat_uses_videotoolbox:
+                print(f"⚠️ VideoToolbox ({self.videotoolbox_encoder}) failed during preview concat for scene {self.scene_id} — {self.scene_name}; falling back to software (libx264).")
+                fallback_command = [
+                    self.ffmpeg,
+                    '-f', 'concat',
+                    '-safe', '0',
+                    '-i', concat_file,
+                    '-vf', "scale=640:360",
+                    '-c:v', 'libx264',
+                    '-crf', '18',
+                    '-preset', 'slow',
+                ] + audio_args + ['-y', '-loglevel', 'quiet', self.output_path]
+                try:
+                    subprocess.run(fallback_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+                    return
+                except subprocess.CalledProcessError as fallback_error:
+                    fallback_stderr = fallback_error.stderr.decode('utf-8', errors='replace').strip().splitlines()
+                    fallback_detail = fallback_stderr[-1] if fallback_stderr else str(fallback_error)
+                    print(f"❌ Software fallback failed for scene {self.scene_id} — {self.scene_name}: {fallback_detail}")
+                    raise RuntimeError(f"FFmpeg failed to concatenate clips (software fallback): {fallback_detail}")
             stderr = e.stderr.decode('utf-8', errors='replace').strip().splitlines()
             detail = stderr[-1] if stderr else str(e)
             print(f"❌ Failed to concatenate preview for scene {self.scene_id} — {self.scene_name}: {detail}")

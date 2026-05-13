@@ -91,6 +91,7 @@ filemask    = None   # --filemask:     Filter scenes by filename pattern (e.g. '
 # ─────────────────────────────────────────────
 vaapi          = True    # Enable VAAPI hardware acceleration if detected (Intel/AMD GPUs)
 nvenc          = False   # Enable NVIDIA NVENC hardware encoder (NVIDIA GPUs)
+videotoolbox   = False   # Enable Apple VideoToolbox H.264 encoder (macOS only; MP4 previews/markers only)
 hw_priority    = "vaapi" # Which encoder takes precedence when both are available: "vaapi" or "nvenc"
 vaapi_override = None    # Set by --vaapi / --novaapi CLI flags at runtime (True/False/None)
 

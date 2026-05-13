@@ -4,6 +4,11 @@ import os
 import sys
 import subprocess
 from helpers.stash_utils import stash
+from helpers.videotoolbox_utils import (
+    get_videotoolbox_encoder,
+    is_videotoolbox_available,
+    normalize_videotoolbox_codec,
+)
 import config
 
 def check_stash_connection():
@@ -128,6 +133,39 @@ def check_nvenc_encoding():
         if os.path.exists(test_output):
             os.remove(test_output)
 
+def check_videotoolbox_encoding(codec='h264'):
+    """Test a real VideoToolbox encode using a synthetic source."""
+    normalized_codec = normalize_videotoolbox_codec(codec)
+    encoder_name = get_videotoolbox_encoder(normalized_codec)
+    if not is_videotoolbox_available(config.ffmpeg, normalized_codec):
+        return False, f"VideoToolbox unavailable (requires macOS + FFmpeg {encoder_name} encoder)"
+
+    test_output = os.path.join(os.getcwd(), ".tmp", "videotoolbox_encode_test.mp4")
+    try:
+        os.makedirs(os.path.dirname(test_output), exist_ok=True)
+        result = subprocess.run([
+            config.ffmpeg,
+            '-f', 'lavfi', '-i', 'testsrc=duration=1:size=128x72:rate=10',
+            '-vf', 'scale=128:72',
+            '-c:v', encoder_name,
+            '-b:v', '1000k',
+            '-an', '-y', test_output
+        ], capture_output=True, timeout=30)
+        if result.returncode != 0:
+            lines = result.stderr.decode('utf-8', errors='replace').strip().splitlines()
+            error = lines[-1] if lines else "no error output"
+            return False, f"VideoToolbox encode failed: {error}"
+        if not os.path.exists(test_output) or os.path.getsize(test_output) == 0:
+            return False, "VideoToolbox encode produced no output"
+        return True, f"VideoToolbox encoding working ({encoder_name})"
+    except subprocess.TimeoutExpired:
+        return False, "VideoToolbox encode test timed out"
+    except Exception as e:
+        return False, f"VideoToolbox encode test error: {e}"
+    finally:
+        if os.path.exists(test_output):
+            os.remove(test_output)
+
 def check_temp_directory():
     """Verify temp directory can be created"""
     try:
@@ -142,7 +180,7 @@ def check_temp_directory():
     except Exception as e:
         return False, f"Cannot write to temp directory: {e}"
 
-def run_health_check(vaapi_device=None):
+def run_health_check(vaapi_device=None, videotoolbox_enabled=False, videotoolbox_codec='h264'):
     """Run all health checks and return results"""
     checks = [
         ("Stash API Connection", check_stash_connection),
@@ -157,6 +195,8 @@ def run_health_check(vaapi_device=None):
         checks.append(("VAAPI Encoding", lambda: check_vaapi_encoding(vaapi_device)))
     elif config.nvenc:
         checks.append(("NVENC Encoding", check_nvenc_encoding))
+    elif videotoolbox_enabled:
+        checks.append(("VideoToolbox Encoding", lambda: check_videotoolbox_encoding(videotoolbox_codec)))
 
     results = []
     all_passed = True

@@ -20,14 +20,68 @@ Everything runs in parallel, one scene won't block another, and a failed scene g
 
 ## Requirements
 
-- Python 3.7+
-- FFmpeg (with VAAPI support if you want GPU acceleration)
+- Python 3.8+
+- [uv](https://docs.astral.sh/uv/)
+- FFmpeg (with VAAPI, NVENC, and/or `h264_videotoolbox` / `hevc_videotoolbox` support if you want GPU acceleration)
+
+Install uv (if needed):
 
 ```bash
-pip install stashapi Pillow tqdm
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+```bash
+git clone https://github.com/pdbadger7/StashVideohasherNodeVAAPI.git
+cd StashVideohasherNodeVAAPI
+uv sync
+```
+
+Then copy and customize config:
+
+```bash
+cp config.py.example config.py
 ```
 
 Phash generation uses the internal pure-Python implementation by default. If you prefer the original videohashes binary, see [PHash Backend](#phash-backend) below.
+
+### Optional global install (CLI command)
+
+If you want a globally available command:
+
+```bash
+uv tool install .
+stash-videohasher --health-check
+```
+
+`stash-videohasher` loads `config.py` from your current working directory first, so run it from the folder where your configured `config.py` lives.
+
+---
+
+## Docker (x86 + ARM64)
+
+This repo now includes a `Dockerfile` that builds on both `linux/amd64` and `linux/arm64`.
+
+### Build
+
+```bash
+docker buildx build --platform linux/amd64 -t stash-videohasher:amd64 .
+docker buildx build --platform linux/arm64 -t stash-videohasher:arm64 .
+```
+
+### Run with VAAPI (Intel/AMD on Linux x86 host)
+
+```bash
+docker run --rm -it \
+  --device /dev/dri:/dev/dri \
+  -v "$(pwd)/config.py:/app/config.py:ro" \
+  -v /mnt/stash:/mnt/stash \
+  stash-videohasher:amd64 --health-check
+```
+
+### Apple M-Series note
+
+`linux/arm64` images run correctly on Apple Silicon, but Docker Desktop containers do **not** expose macOS VideoToolbox into Linux containers.  
+For Apple M-Series hardware acceleration (`h264_videotoolbox` / `hevc_videotoolbox`), run the script natively on macOS instead of inside Docker.
 
 ---
 
@@ -58,22 +112,22 @@ marker_path  = "/mnt/stash/generated"   # markers saved under markers/{oshash}/
 
 ### 3. Add your tag IDs
 
-The script uses Stash tags to track which scenes are in-progress and which had errors. Create these tags in Stash and drop their IDs here:
+The script uses Stash tags to track which scenes are in-progress and which had errors.
+If these are missing (`0`/unset), startup now auto-fills them by fetching existing tags from Stash and creating missing ones.
 
 ```python
-hashing_tag       = 15015   # "In Process" — claimed by a node, don't touch
-hashing_error_tag = 15018   # "Phash Error" — hashing failed
-cover_error_tag   = 15019   # "Cover Error" — cover extraction failed
+hashing_tag       = 0   # auto-fill: "In Process"
+hashing_error_tag = 0   # auto-fill: "Phash Error" (or existing "Hashing Error")
+cover_error_tag   = 0   # auto-fill: "Cover Error"
 ```
 
 ### 4. Path translation (multi-machine setups)
 
-If this node and your Stash server see the same files at different paths, add translations:
+If this node and your Stash server see the same files at different paths, add translations.
+If `translations` is empty, startup tries a best-effort auto-detection from scene paths + your local generated-media mount roots:
 
 ```python
-translations = [
-    {'orig': '/mnt/storage/', 'local': '/mnt/nas/'},
-]
+translations = []
 ```
 
 ### 5. Run the health check
@@ -81,7 +135,7 @@ translations = [
 Before your first real run, make sure everything is wired up correctly:
 
 ```bash
-python phash_videohasher_main.py --health-check
+uv run stash-videohasher --health-check
 ```
 
 This validates your Stash connection, checks that the configured phash backend is ready, confirms output paths are writable, and does a real test encode on whichever GPU encoder you have configured. All green? You're ready to go.
@@ -101,7 +155,7 @@ phash_backend = "internal"
 Pure-Python implementation — no binary needed. Requires numpy and scipy:
 
 ```bash
-pip install numpy scipy
+uv add numpy scipy
 ```
 
 Implements the same algorithm as goimagehash (the library Stash uses internally), validated against a library of stored hashes. VAAPI hardware decode is used for frame extraction when available.
@@ -127,8 +181,8 @@ vaapi = True   # Use VAAPI if detected (default)
 ```
 
 ```bash
-python phash_videohasher_main.py --vaapi    # force on
-python phash_videohasher_main.py --novaapi  # force off
+uv run stash-videohasher --vaapi    # force on
+uv run stash-videohasher --novaapi  # force off
 ```
 
 ### NVENC (NVIDIA)
@@ -138,8 +192,25 @@ nvenc = True   # Enable NVENC (default: False)
 ```
 
 ```bash
-python phash_videohasher_main.py --nvenc
+uv run stash-videohasher --nvenc
 ```
+
+### VideoToolbox (Apple Silicon / macOS)
+
+```python
+videotoolbox = True            # Enable VideoToolbox (default: False)
+videotoolbox_codec = "h264"    # "h264" (default) or "hevc" ("h265" alias accepted)
+```
+
+```bash
+uv run stash-videohasher --videotoolbox
+uv run stash-videohasher --novideotoolbox
+uv run stash-videohasher --videotoolbox-codec hevc
+```
+
+VideoToolbox support is **macOS-only** and requires FFmpeg built with `h264_videotoolbox` (for H.264) and/or `hevc_videotoolbox` (for H.265/HEVC).
+It is currently used only for **MP4 preview encoding** (scene previews and marker MP4 clips).
+Sprites, WebP, JPG/screenshot extraction, cover extraction, and phash generation stay on their existing paths.
 
 ### When both are available
 
@@ -148,10 +219,10 @@ hw_priority = "vaapi"   # "vaapi" (default) or "nvenc"
 ```
 
 ```bash
-python phash_videohasher_main.py --hw-priority nvenc
+uv run stash-videohasher --hw-priority nvenc
 ```
 
-Encoder resolution order: **VAAPI → NVENC → libx264**
+Encoder resolution order: **VAAPI → NVENC → VideoToolbox → libx264**
 
 ### Performance comparison
 
@@ -169,19 +240,19 @@ Sprite and preview generation follow the `generate_sprite` and `generate_preview
 
 ```bash
 # Default run — phash + cover + whatever is enabled in config.py, loops until done
-python phash_videohasher_main.py
+uv run stash-videohasher
 
 # Force all generation on, regardless of config
-python phash_videohasher_main.py --generate-sprite --generate-preview --generate-markers
+uv run stash-videohasher --generate-sprite --generate-preview --generate-markers
 
 # Run one batch and exit (good for cron)
-python phash_videohasher_main.py --once --batch-size 25
+uv run stash-videohasher --once --batch-size 25
 
 # Test on a small sample first
-python phash_videohasher_main.py --once --batch-size 5 --verbose
+uv run stash-videohasher --once --batch-size 5 --verbose
 
 # Filter to specific files
-python phash_videohasher_main.py --filemask "JoonMali*" --generate-sprite --generate-preview --once
+uv run stash-videohasher --filemask "JoonMali*" --generate-sprite --generate-preview --once
 ```
 
 ### Generate missing media in bulk
@@ -190,41 +261,41 @@ The integrated flags (`--generate-sprite`, `--generate-preview`, `--generate-mar
 
 ```bash
 # Generate missing sprites (50 at a time)
-python phash_videohasher_main.py --standalone-sprites --sprite-batch-size 50 --verbose
+uv run stash-videohasher --standalone-sprites --sprite-batch-size 50 --verbose
 
 # Generate missing previews (25 at a time)
-python phash_videohasher_main.py --standalone-previews --preview-batch-size 25 --verbose
+uv run stash-videohasher --standalone-previews --preview-batch-size 25 --verbose
 
 # Generate missing marker media (100 at a time)
-python phash_videohasher_main.py --standalone-markers --marker-batch-size 100 --verbose
+uv run stash-videohasher --standalone-markers --marker-batch-size 100 --verbose
 
 # Run all three at once
-python phash_videohasher_main.py --standalone-sprites --standalone-previews --standalone-markers
+uv run stash-videohasher --standalone-sprites --standalone-previews --standalone-markers
 ```
 
 You can also generate only specific types of marker media:
 
 ```bash
-python phash_videohasher_main.py --standalone-markers --marker-preview-only     # MP4 clips only
-python phash_videohasher_main.py --standalone-markers --marker-thumbnail-only   # WebP animations only
-python phash_videohasher_main.py --standalone-markers --marker-screenshot-only  # JPG screenshots only
+uv run stash-videohasher --standalone-markers --marker-preview-only     # MP4 clips only
+uv run stash-videohasher --standalone-markers --marker-thumbnail-only   # WebP animations only
+uv run stash-videohasher --standalone-markers --marker-screenshot-only  # JPG screenshots only
 ```
 
 ### Error recovery
 
 ```bash
 # Retry scenes that previously failed
-python phash_videohasher_main.py --retry-errors
+uv run stash-videohasher --retry-errors
 
 # Clear all error tags to start completely fresh
-python phash_videohasher_main.py --clear-error-tags
+uv run stash-videohasher --clear-error-tags
 ```
 
 ### See what it would do
 
 ```bash
-python phash_videohasher_main.py --dry-run --verbose --once
-python phash_videohasher_main.py --standalone-markers --dry-run --verbose
+uv run stash-videohasher --dry-run --verbose --once
+uv run stash-videohasher --standalone-markers --dry-run --verbose
 ```
 
 ---
@@ -291,12 +362,17 @@ Hardware acceleration:
   --vaapi                       Force VAAPI on
   --novaapi                     Force VAAPI off
   --nvenc                       Enable NVIDIA NVENC
+  --videotoolbox                Enable Apple VideoToolbox encoder (macOS only; scene/marker MP4 previews)
+  --novideotoolbox              Disable VideoToolbox
+  --videotoolbox-codec {h264,hevc,h265}
+                                VideoToolbox codec for MP4 previews
   --hw-priority {vaapi,nvenc}   Which encoder wins when both are available
 
 Utilities:
   --health-check        Validate config and exit
   --retry-errors        Process scenes with error tags
   --clear-error-tags    Remove all error tags and exit
+  --no-auto-setup       Disable startup autofill for missing tag IDs/translations
 ```
 
 ---
@@ -352,8 +428,8 @@ Setting up VAAPI on Ubuntu:
 
 **Error tags piling up** — Check `error_log.txt` to see what failed, fix any config issues, then:
 ```bash
-python phash_videohasher_main.py --clear-error-tags
-python phash_videohasher_main.py --retry-errors
+uv run stash-videohasher --clear-error-tags
+uv run stash-videohasher --retry-errors
 ```
 
 **Process hangs** — The 10-minute timeout per scene should prevent this. If you're still seeing hangs, check `error_log.txt` for details on which scenes are timing out.

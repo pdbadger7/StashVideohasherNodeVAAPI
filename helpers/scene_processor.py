@@ -16,8 +16,6 @@ from config import (
     windows, binary, ffmpeg, ffprobe,
     sprite_path, preview_path,
     preview_audio, preview_clips, preview_clip_length, preview_skip_seconds,
-    translations,
-    hashing_tag, hashing_error_tag, cover_error_tag
 )
 
 from helpers.stash_utils import (
@@ -25,7 +23,7 @@ from helpers.stash_utils import (
     update_phash, update_cover, log_scene_failure
 )
 
-def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, vaapi_device=None):
+def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, vaapi_device=None, videotoolbox_supported=False):
     import time
     import config
     start_time = time.time()
@@ -44,7 +42,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
     else:
         print(f"[{timestamp}] 📦 Processing scene: ID {scene_id} — {filename_pretty}")
 
-    for t in translations:
+    for t in config.translations:
         filename = filename.replace(t['orig'], t['local'], 1)
 
     filehash = ""
@@ -54,7 +52,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
 
     if not filehash or ":" in filehash or "\\" in filehash or "/" in filehash:
         log_scene_failure(scene_id, filename_pretty, "oshash validation", f"Invalid or missing oshash: {filehash!r}")
-        tag_scene_error(scene_id, hashing_error_tag, f"Invalid or missing oshash: {filehash!r}")
+        tag_scene_error(scene_id, config.hashing_error_tag, f"Invalid or missing oshash: {filehash!r}")
         elapsed = time.time() - start_time
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
@@ -66,7 +64,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
 
     if not file_exists:
         log_scene_failure(scene_id, filename_pretty, "file check", "File not found after translation")
-        tag_scene_error(scene_id, hashing_error_tag, "File not found after translation")
+        tag_scene_error(scene_id, config.hashing_error_tag, "File not found after translation")
         elapsed = time.time() - start_time
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
@@ -100,7 +98,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                     print(f"🟡 [DEBUG] Finished phash generation for {filename_pretty} in {phash_elapsed:.2f} seconds")
             except Exception as e:
                 log_scene_failure(scene_id, filename_pretty, "hashing", e)
-                tag_scene_error(scene_id, hashing_error_tag, str(e))
+                tag_scene_error(scene_id, config.hashing_error_tag, str(e))
                 success = False
                 # Don't return early - release_scene in finally block
 
@@ -142,12 +140,12 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             print(f"🟡 [DEBUG] Finished cover image extraction for {filename_pretty} in {cover_elapsed:.2f} seconds")
                     except Exception as e:
                         log_scene_failure(scene_id, filename_pretty, "cover image generation", e)
-                        tag_scene_error(scene_id, cover_error_tag, str(e))
+                        tag_scene_error(scene_id, config.cover_error_tag, str(e))
                     finally:
                         shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception as e:
             log_scene_failure(scene_id, filename_pretty, "cover image setup", e)
-            tag_scene_error(scene_id, cover_error_tag, str(e))
+            tag_scene_error(scene_id, config.cover_error_tag, str(e))
 
         if config.generate_sprite:
             sprite_file = os.path.join(sprite_path, f"{filehash}_sprite.jpg")
@@ -179,7 +177,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Sprite generation complete for {filename_pretty} in {sprite_elapsed:.2f} seconds.")
                     except Exception as e:
                         log_scene_failure(scene_id, filename_pretty, "sprite generation", e)
-                        tag_scene_error(scene_id, hashing_error_tag, str(e))
+                        tag_scene_error(scene_id, config.hashing_error_tag, str(e))
                         success = False
                         # Don't return early - continue to release scene
 
@@ -207,7 +205,9 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             preview_clips=preview_clips, clip_length=preview_clip_length,
                             skip_seconds=preview_skip_seconds, include_audio=preview_audio,
                             scene_id=scene_id, scene_name=filename_pretty,
-                            use_vaapi=vaapi_supported, vaapi_device=vaapi_device
+                            use_vaapi=vaapi_supported, vaapi_device=vaapi_device,
+                            use_videotoolbox=videotoolbox_supported,
+                            videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
                         )
                         generator.generate_preview()
                         preview_elapsed = time.time() - preview_start
@@ -217,7 +217,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Preview generation complete for {filename_pretty} in {preview_elapsed:.2f} seconds.")
                     except Exception as e:
                         log_scene_failure(scene_id, filename_pretty, "preview generation", e)
-                        tag_scene_error(scene_id, hashing_error_tag, str(e))
+                        tag_scene_error(scene_id, config.hashing_error_tag, str(e))
                         success = False
                         # Don't return early - continue to release scene
 
@@ -255,7 +255,9 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                                         thumbnail_duration=config.marker_thumbnail_duration,
                                         thumbnail_fps=config.marker_thumbnail_fps,
                                         use_vaapi=vaapi_supported,
-                                        vaapi_device=vaapi_device
+                                        vaapi_device=vaapi_device,
+                                        use_videotoolbox=videotoolbox_supported,
+                                        videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
                                     )
 
                                     result = generator.generate_marker()

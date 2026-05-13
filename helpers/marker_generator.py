@@ -6,13 +6,14 @@ import shutil
 import time
 from datetime import datetime
 from config import verbose, nvenc
+from helpers.videotoolbox_utils import get_videotoolbox_encoder, normalize_videotoolbox_codec
 
 class MarkerGenerator:
     def __init__(self, video_path, marker_seconds, oshash, output_base_dir,
                  ffmpeg='ffmpeg', ffprobe='ffprobe',
                  preview_enabled=True, thumbnail_enabled=True, screenshot_enabled=True,
                  preview_duration=20, thumbnail_duration=5, thumbnail_fps=12,
-                 use_vaapi=None, vaapi_device=None):
+                 use_vaapi=None, vaapi_device=None, use_videotoolbox=None, videotoolbox_codec='h264'):
         """
         Initialize marker generator for creating marker media files.
 
@@ -31,6 +32,8 @@ class MarkerGenerator:
             thumbnail_fps: WebP animation frame rate
             use_vaapi: Enable VAAPI hardware acceleration
             vaapi_device: VAAPI device path
+            use_videotoolbox: Enable VideoToolbox hardware acceleration for MP4 previews
+            videotoolbox_codec: VideoToolbox codec ('h264' or 'hevc'; 'h265' alias accepted)
         """
         self.video_path = os.path.abspath(video_path.strip('"').strip("'"))
         self.marker_seconds = marker_seconds
@@ -56,6 +59,9 @@ class MarkerGenerator:
         self.thumbnail_fps = thumbnail_fps
         self.use_vaapi = use_vaapi
         self.vaapi_device = vaapi_device
+        self.use_videotoolbox = use_videotoolbox
+        self.videotoolbox_codec = normalize_videotoolbox_codec(videotoolbox_codec)
+        self.videotoolbox_encoder = get_videotoolbox_encoder(self.videotoolbox_codec)
 
         # Temp directory
         self.temp_dir = os.path.abspath(os.path.join(".tmp", f"marker_{oshash}_{self.marker_int}"))
@@ -73,6 +79,8 @@ class MarkerGenerator:
         os.makedirs(os.path.dirname(self.mp4_path), exist_ok=True)
 
         use_vaapi = bool(self.use_vaapi) and bool(self.vaapi_device)
+        use_videotoolbox = bool(self.use_videotoolbox)
+        preview_uses_videotoolbox = False
 
         if use_vaapi:
             # VAAPI hardware-accelerated encoding
@@ -104,6 +112,21 @@ class MarkerGenerator:
                 '-loglevel', 'quiet',
                 self.mp4_path
             ]
+        elif use_videotoolbox:
+            preview_uses_videotoolbox = True
+            # VideoToolbox hardware-accelerated encoding
+            command = [
+                self.ffmpeg, '-y',
+                '-ss', str(self.marker_seconds),
+                '-t', str(self.preview_duration),
+                '-i', self.video_path,
+                '-vf', 'scale=640:-2',
+                '-c:v', self.videotoolbox_encoder,
+                '-b:v', '2500k',
+                '-an',
+                '-loglevel', 'quiet',
+                self.mp4_path
+            ]
         else:
             # Software encoding fallback
             command = [
@@ -124,6 +147,29 @@ class MarkerGenerator:
             subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
             return os.path.exists(self.mp4_path)
         except subprocess.CalledProcessError as e:
+            if preview_uses_videotoolbox:
+                print(f"⚠️ VideoToolbox ({self.videotoolbox_encoder}) failed for marker MP4 preview; falling back to software (libx264).")
+                fallback_command = [
+                    self.ffmpeg, '-y',
+                    '-ss', str(self.marker_seconds),
+                    '-t', str(self.preview_duration),
+                    '-i', self.video_path,
+                    '-vf', 'scale=640:-2',
+                    '-c:v', 'libx264',
+                    '-crf', '18',
+                    '-preset', 'slow',
+                    '-an',
+                    '-loglevel', 'quiet',
+                    self.mp4_path
+                ]
+                try:
+                    subprocess.run(fallback_command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
+                    return os.path.exists(self.mp4_path)
+                except subprocess.CalledProcessError as fallback_error:
+                    fallback_stderr = fallback_error.stderr.decode('utf-8', errors='replace').strip().splitlines()
+                    fallback_detail = fallback_stderr[-1] if fallback_stderr else str(fallback_error)
+                    print(f"⚠️ Failed to generate MP4 preview via software fallback: {fallback_detail}")
+                    return False
             stderr = e.stderr.decode('utf-8', errors='replace').strip().splitlines()
             detail = stderr[-1] if stderr else str(e)
             print(f"⚠️ Failed to generate MP4 preview: {detail}")

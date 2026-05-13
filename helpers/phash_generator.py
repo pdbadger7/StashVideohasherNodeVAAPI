@@ -26,9 +26,8 @@
 # content where decode is the bottleneck.  Falls back to software automatically.
 
 import math
-import os
-import tempfile
 import subprocess
+from io import BytesIO
 
 import numpy as np
 from PIL import Image
@@ -124,30 +123,27 @@ def _get_duration(video_path):
 
 def _extract_frame_software(video_path, timestamp):
     """Extract one frame at `timestamp` via software decode. Returns PIL Image."""
-    fd, tmp = tempfile.mkstemp(suffix='.bmp')
-    os.close(fd)
     try:
-        subprocess.run(
+        result = subprocess.run(
             [config.ffmpeg,
              '-ss', f'{timestamp:.6f}',
              '-i', video_path,
              '-frames:v', '1',
              '-vf', f'scale={FRAME_WIDTH}:-1',
-             '-y', '-loglevel', 'error',
-             tmp],
+             '-f', 'image2pipe',
+             '-vcodec', 'bmp',
+             '-loglevel', 'error',
+             'pipe:1'],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=60,
         )
-        img = Image.open(tmp)
+        img = Image.open(BytesIO(result.stdout))
         return img.copy()
     except subprocess.CalledProcessError as e:
         err = e.stderr.decode('utf-8', errors='replace').strip()
         raise RuntimeError(f"ffmpeg frame extraction failed at {timestamp:.1f}s: {err}") from e
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
 
 
 def _extract_frame_vaapi(video_path, timestamp, vaapi_device):
@@ -155,10 +151,8 @@ def _extract_frame_vaapi(video_path, timestamp, vaapi_device):
     Extract one frame at `timestamp` using VAAPI hardware decode + scale.
     Falls back to software on failure.
     """
-    fd, tmp = tempfile.mkstemp(suffix='.bmp')
-    os.close(fd)
     try:
-        subprocess.run(
+        result = subprocess.run(
             [config.ffmpeg,
              '-vaapi_device', vaapi_device,
              '-hwaccel', 'vaapi',
@@ -167,21 +161,20 @@ def _extract_frame_vaapi(video_path, timestamp, vaapi_device):
              '-i', video_path,
              '-frames:v', '1',
              '-vf', f'scale_vaapi={FRAME_WIDTH}:-1,hwdownload,format=bgr0',
-             '-y', '-loglevel', 'error',
-             tmp],
+             '-f', 'image2pipe',
+             '-vcodec', 'bmp',
+             '-loglevel', 'error',
+             'pipe:1'],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=60,
         )
-        img = Image.open(tmp)
+        img = Image.open(BytesIO(result.stdout))
         return img.copy()
     except Exception:
         # VAAPI decode may fail for unsupported codecs (e.g. AV1, VP9 on older drivers)
         return _extract_frame_software(video_path, timestamp)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
 
 
 def _extract_frame(video_path, timestamp, vaapi_device=None):
@@ -274,5 +267,4 @@ def compute_phash(video_path, vaapi_device=None):
     sprite   = _build_sprite(video_path, duration, vaapi_device=vaapi_device)
     phash    = _phash_from_sprite(sprite)
     return {"phash": phash}
-
 
