@@ -11,11 +11,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import config
-from helpers.scene_discovery import discover_scenes
-from helpers.scene_processor import process_scene
-from helpers.stash_utils import get_total_scene_count, get_error_scenes, clear_error_tags, get_hashing_scenes, clear_hashing_tags, reset_terminal
-from helpers.health_check import run_health_check
-from helpers.statistics import batch_stats
+from helpers.config_loader import ConfigError
 
 # Global shutdown flag and event for signal handling
 shutdown_requested = False
@@ -241,15 +237,15 @@ def main():
             "VAAPI-accelerated Stash video processor.\n\n"
             "DEFAULT BEHAVIOR (no options): Discovers scenes missing a phash, then generates\n"
             "phash + cover image for each one. Sprite and preview generation also run if\n"
-            "enabled in config.py (generate_sprite / generate_preview). Marker generation\n"
+            "enabled in config.yml (generate_sprite / generate_preview). Marker generation\n"
             "is off by default. Loops continuously until all scenes are processed.\n"
             "All generation types can be forced on via flags below regardless of config."
         ),
         epilog="""
-Default run (loops until complete, runs whatever is enabled in config.py):
+Default run (loops until complete, runs whatever is enabled in config.yml):
   python %(prog)s
 
-One batch and exit — runs all generation types enabled in config.py (good for cron):
+One batch and exit — runs all generation types enabled in config.yml (good for cron):
   python %(prog)s --once --verbose
 
 Force all generation on regardless of config (one batch):
@@ -287,6 +283,7 @@ Other useful options:
     basic.add_argument("--once", action="store_true", help="Run a single batch and exit (don't loop)")
     basic.add_argument("--filemask", type=str, help="Filter scenes by filename pattern (e.g., 'JoonMali*' or '*.mp4')")
     basic.add_argument("--no-auto-setup", action="store_true", help="Disable startup autofill for missing tag IDs and translations")
+    basic.add_argument("--config", type=str, help="Path to YAML config file (default: $XDG_CONFIG_HOME/stash-videohasher/config.yml or ~/.config/stash-videohasher/config.yml)")
 
     # Integrated scene processing
     integrated = parser.add_argument_group('Integrated Scene Processing', 'Enable media generation during scene processing')
@@ -331,7 +328,27 @@ Other useful options:
     utilities.add_argument("--clear-hashing-tags", action="store_true", help="Clear stuck in-process tags (use after a crash) and exit")
 
     args = parser.parse_args()
+    try:
+        loaded_path = config.initialize_runtime(args.config)
+    except ConfigError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+    if args.verbose:
+        print(f"📄 Loaded config: {loaded_path}")
     apply_cli_args(args)
+
+    from helpers.scene_discovery import discover_scenes
+    from helpers.scene_processor import process_scene
+    from helpers.stash_utils import (
+        get_total_scene_count,
+        get_error_scenes,
+        clear_error_tags,
+        get_hashing_scenes,
+        clear_hashing_tags,
+        reset_terminal,
+    )
+    from helpers.health_check import run_health_check
+    from helpers.statistics import batch_stats
 
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGTERM, signal_handler)

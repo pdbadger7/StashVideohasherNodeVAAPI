@@ -42,7 +42,8 @@ uv sync
 Then copy and customize config:
 
 ```bash
-cp config.py.example config.py
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/stash-videohasher"
+cp config.example.yml "${XDG_CONFIG_HOME:-$HOME/.config}/stash-videohasher/config.yml"
 ```
 
 Phash generation uses the internal pure-Python implementation by default. If you prefer the original videohashes binary, see [PHash Backend](#phash-backend) below.
@@ -56,7 +57,14 @@ uv tool install .
 stash-videohasher --health-check
 ```
 
-`stash-videohasher` loads `config.py` from your current working directory first, so run it from the folder where your configured `config.py` lives.
+`stash-videohasher` loads YAML config from:
+- `$XDG_CONFIG_HOME/stash-videohasher/config.yml` (if `XDG_CONFIG_HOME` is set), otherwise
+- `~/.config/stash-videohasher/config.yml`
+
+Use `--config /path/to/config.yml` to override.
+
+Environment variables with the `STASH_VH_` prefix are also supported (for example `STASH_VH_STASH_HOST`, `STASH_VH_PER_PAGE`, `STASH_VH_DRY_RUN`). Precedence is:
+**defaults < config.yml < STASH_VH_* env vars < CLI flags**.
 
 After the package is published to PyPI, you can install/run it without cloning this repo:
 
@@ -84,9 +92,9 @@ docker buildx build --platform linux/arm64 -t stashvideohashernode:arm64 .
 ```bash
 docker run --rm -it \
   --device /dev/dri:/dev/dri \
-  -v "$(pwd)/config.py:/app/config.py:ro" \
+  -v "${XDG_CONFIG_HOME:-$HOME/.config}/stash-videohasher/config.yml:/config/config.yml:ro" \
   -v /mnt/stash:/mnt/stash \
-  stashvideohashernode:amd64 --health-check
+  stashvideohashernode:amd64 --config /config/config.yml --health-check
 ```
 
 ### Apple M-Series note
@@ -100,13 +108,13 @@ For Apple M-Series hardware acceleration (`h264_videotoolbox` / `hevc_videotoolb
 
 ### 1. Point it at your Stash server
 
-Open `config.py` and fill in your connection details:
+Open your `config.yml` and fill in your connection details:
 
-```python
-stash_scheme  = "http"          # "http" or "https"
-stash_host    = "127.0.0.1"    # Your Stash server IP or hostname
-stash_port    = 9999            # Your Stash port
-stash_api_key = None            # Paste your API key here if Stash requires auth
+```yaml
+stash_scheme: http
+stash_host: 127.0.0.1
+stash_port: 9999
+stash_api_key: null
 ```
 
 To get your API key: Stash → **Settings → Security** → copy or generate the key.
@@ -115,10 +123,10 @@ To get your API key: Stash → **Settings → Security** → copy or generate th
 
 Tell the script where your Stash-generated files live:
 
-```python
-sprite_path  = "/mnt/stash/generated/vtt"
-preview_path = "/mnt/stash/generated/screenshots"
-marker_path  = "/mnt/stash/generated"   # markers saved under markers/{oshash}/
+```yaml
+sprite_path: /mnt/stash/generated/vtt
+preview_path: /mnt/stash/generated/screenshots
+marker_path: /mnt/stash/generated
 ```
 
 ### 3. Add your tag IDs
@@ -126,10 +134,10 @@ marker_path  = "/mnt/stash/generated"   # markers saved under markers/{oshash}/
 The script uses Stash tags to track which scenes are in-progress and which had errors.
 If these are missing (`0`/unset), startup now auto-fills them by fetching existing tags from Stash and creating missing ones.
 
-```python
-hashing_tag       = 0   # auto-fill: "In Process"
-hashing_error_tag = 0   # auto-fill: "Phash Error" (or existing "Hashing Error")
-cover_error_tag   = 0   # auto-fill: "Cover Error"
+```yaml
+hashing_tag: 0
+hashing_error_tag: 0
+cover_error_tag: 0
 ```
 
 ### 4. Path translation (multi-machine setups)
@@ -137,8 +145,8 @@ cover_error_tag   = 0   # auto-fill: "Cover Error"
 If this node and your Stash server see the same files at different paths, add translations.
 If `translations` is empty, startup tries a best-effort auto-detection from scene paths + your local generated-media mount roots:
 
-```python
-translations = []
+```yaml
+translations: []
 ```
 
 ### 5. Run the health check
@@ -155,12 +163,12 @@ This validates your Stash connection, checks that the configured phash backend i
 
 ## PHash Backend
 
-Phash generation supports two backends, controlled by `phash_backend` in `config.py`:
+Phash generation supports two backends, controlled by `phash_backend` in `config.yml`:
 
 ### Internal (default)
 
-```python
-phash_backend = "internal"
+```yaml
+phash_backend: internal
 ```
 
 Pure-Python implementation — no binary needed. Requires numpy and scipy:
@@ -173,8 +181,8 @@ Implements the same algorithm as goimagehash (the library Stash uses internally)
 
 ### Videohashes binary
 
-```python
-phash_backend = "binary"
+```yaml
+phash_backend: binary
 ```
 
 Uses [Peolic's videohashes binary](https://github.com/peolic/videohashes). Download the right executable for your OS into the `bin/` directory. No additional Python dependencies required.
@@ -187,8 +195,8 @@ The script auto-detects VAAPI at startup and picks the best encoder automaticall
 
 ### VAAPI (Intel / AMD)
 
-```python
-vaapi = True   # Use VAAPI if detected (default)
+```yaml
+vaapi: true
 ```
 
 ```bash
@@ -198,8 +206,8 @@ uv run stash-videohasher --novaapi  # force off
 
 ### NVENC (NVIDIA)
 
-```python
-nvenc = True   # Enable NVENC (default: False)
+```yaml
+nvenc: true
 ```
 
 ```bash
@@ -208,9 +216,9 @@ uv run stash-videohasher --nvenc
 
 ### VideoToolbox (Apple Silicon / macOS)
 
-```python
-videotoolbox = True            # Enable VideoToolbox (default: False)
-videotoolbox_codec = "h264"    # "h264" (default) or "hevc" ("h265" alias accepted)
+```yaml
+videotoolbox: true
+videotoolbox_codec: h264
 ```
 
 ```bash
@@ -225,8 +233,8 @@ Sprites, WebP, JPG/screenshot extraction, cover extraction, and phash generation
 
 ### When both are available
 
-```python
-hw_priority = "vaapi"   # "vaapi" (default) or "nvenc"
+```yaml
+hw_priority: vaapi
 ```
 
 ```bash
@@ -247,10 +255,10 @@ When benchmarked on a batch of 25 comparable scenes VAAPI came out ~35% faster t
 
 **Phash is always generated** — it's the core job and runs unconditionally whenever a scene is processed. You don't need a flag for it.
 
-Sprite and preview generation follow the `generate_sprite` and `generate_preview` settings in `config.py` (both default to `True`). Marker generation is off by default and must be enabled via config or `--generate-markers`. The CLI flags force these on regardless of config.
+Sprite and preview generation follow the `generate_sprite` and `generate_preview` settings in `config.yml` (both default to `True`). Marker generation can be enabled in config or via `--generate-markers`. CLI flags force these on regardless of config.
 
 ```bash
-# Default run — phash + cover + whatever is enabled in config.py, loops until done
+# Default run — phash + cover + whatever is enabled in config.yml, loops until done
 uv run stash-videohasher
 
 # Force all generation on, regardless of config
@@ -313,21 +321,19 @@ uv run stash-videohasher --standalone-markers --dry-run --verbose
 
 ## Marker Generation
 
-Marker generation is off by default. Turn it on in `config.py` or with the `--generate-markers` flag:
+Turn marker generation on in `config.yml` or with the `--generate-markers` flag:
 
-```python
-generate_markers = True
+```yaml
+generate_markers: true
 
-# What to generate (all on by default)
-marker_preview_enabled    = True   # 20-second MP4 clips
-marker_thumbnail_enabled  = True   # 5-second WebP animations
-marker_screenshot_enabled = True   # Single JPG frames
+marker_preview_enabled: true
+marker_thumbnail_enabled: true
+marker_screenshot_enabled: true
 
-# Timing and quality
-marker_preview_duration   = 20     # MP4 clip length in seconds
-marker_thumbnail_duration = 5      # WebP animation length in seconds
-marker_thumbnail_fps      = 12     # WebP frame rate
-marker_batch_size         = 50     # Batch size for standalone marker mode
+marker_preview_duration: 20
+marker_thumbnail_duration: 5
+marker_thumbnail_fps: 12
+marker_batch_size: 50
 ```
 
 Marker files are saved alongside your other generated media:

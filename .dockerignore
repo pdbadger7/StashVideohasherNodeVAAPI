@@ -10,4 +10,4 @@ __pycache__/
 error_log.txt
 benchmarking/
 tests/
-config.py
+config.yml

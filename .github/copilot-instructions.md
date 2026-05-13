@@ -41,7 +41,7 @@ The system is a threaded Stash worker that can run on multiple nodes and process
 
 ## Key repository conventions
 
-1. **`config.py` is runtime state, not just constants.** CLI flags override config values in `apply_cli_args()`, and helpers read from the shared module.
+1. **`config.py` is runtime state, loaded from YAML.** CLI flags override config values in `apply_cli_args()`, and helpers read from the shared module.
 2. **Always preserve claim/release safety.** Any scene-processing change must keep release in `finally` semantics so stuck `hashing_tag` states are avoided.
 3. **Respect dry-run behavior in Stash write paths.** Mutating operations in `stash_utils` should gate on `dry_run` and print intended actions.
 4. **Translate paths before filesystem access.** Scene file paths from Stash must pass through `translations` mapping before existence checks and processing.

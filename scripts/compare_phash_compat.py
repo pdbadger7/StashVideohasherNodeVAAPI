@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import config
 from helpers import phash_generator
+from helpers.config_loader import ConfigError
 
 VIDEO_EXTENSIONS = {
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg"
@@ -213,7 +214,18 @@ def main():
         default=None,
         help="Optional ffprobe binary path override.",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional YAML config path override.",
+    )
     args = parser.parse_args()
+
+    try:
+        config.initialize_runtime(args.config)
+    except ConfigError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
 
     if args.ffmpeg_bin:
         config.ffmpeg = args.ffmpeg_bin

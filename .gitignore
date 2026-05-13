@@ -81,7 +81,7 @@ benchmarking/*.json
 benchmarking/phash_python_benchmark.py
 
 # Local configuration (contains credentials and machine-specific paths)
-config.py
+config.yml
 config_local.py
 local_config.py
 

@@ -23,6 +23,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+from helpers.config_loader import ConfigError
 from helpers.vaapi_utils import vaapi_available
 from PIL import Image
 
@@ -141,7 +142,14 @@ def main():
     parser.add_argument('--all',      action='store_true',
                         help='Benchmark both VAAPI and software and compare')
     parser.add_argument('--verbose',  action='store_true', help='Show FFmpeg commands')
+    parser.add_argument('--config',   type=str, help='Path to YAML config file')
     args = parser.parse_args()
+
+    try:
+        config.initialize_runtime(args.config)
+    except ConfigError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
 
     if not os.path.exists(args.input):
         print(f"Input file not found: {args.input}")

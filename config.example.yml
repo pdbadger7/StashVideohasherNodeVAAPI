@@ -1,0 +1,67 @@
+# Copy to:
+#   $XDG_CONFIG_HOME/stash-videohasher/config.yml
+# or:
+#   ~/.config/stash-videohasher/config.yml
+#
+# CLI precedence: defaults < YAML < STASH_VH_* env vars < CLI flags
+
+stash_scheme: http
+stash_host: 127.0.0.1
+stash_port: 9999
+stash_api_key: null
+
+phash_backend: binary # binary | internal
+binary_windows: ".\\bin\\videohashes-windows.exe"
+binary_linux: "./bin/videohashes-linux"
+
+ffmpeg: /usr/bin/ffmpeg
+ffprobe: /usr/bin/ffprobe
+
+sprite_path: /mnt/stash/stash/generated/vtt
+preview_path: /mnt/stash/stash/generated/screenshots
+marker_path: /mnt/stash/stash/generated
+
+excluded_paths: []
+
+hashing_tag: 15015
+hashing_error_tag: 15018
+cover_error_tag: 15019
+
+translations: []
+
+error_log_path: error_log.txt
+error_log_max_mb: 10
+
+per_page: 25
+max_workers: 4
+batch_sleep: 5
+dry_run: false
+once: false
+verbose: false
+debug: false
+filemask: null
+
+vaapi: true
+nvenc: false
+videotoolbox: false
+videotoolbox_codec: h264 # h264 | hevc (h265 alias accepted)
+hw_priority: vaapi # vaapi | nvenc
+vaapi_override: null # runtime override via CLI
+
+generate_sprite: true
+generate_preview: true
+preview_audio: false
+preview_clips: 15
+preview_clip_length: 1
+preview_skip_seconds: 15
+
+generate_markers: true
+marker_batch_size: 50
+
+marker_preview_enabled: true
+marker_thumbnail_enabled: true
+marker_screenshot_enabled: true
+
+marker_preview_duration: 20
+marker_thumbnail_duration: 5
+marker_thumbnail_fps: 12
