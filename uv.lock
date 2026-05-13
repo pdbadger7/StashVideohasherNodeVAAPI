@@ -980,7 +980,21 @@ wheels = [
 ]
 
 [[package]]
-name = "stash-videohasher-node-vaapi"
+name = "stashapp-tools"
+version = "0.2.59"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "requests", version = "2.34.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ad/a8/60680ce6651cb66aa982720366b08ce23237b084078d787f7edfaf023a1c/stashapp-tools-0.2.59.tar.gz", hash = "sha256:639d98b9e587a7c0b616c9c9d3560c064cf83b6cf877b441782b30586afc4a36", size = 32969, upload-time = "2025-09-29T13:30:38.811Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/4d/7262a8dd1f96c012c4b3271453d4c3cbde7caa6b291d18b00553fc6ad64a/stashapp_tools-0.2.59-py3-none-any.whl", hash = "sha256:ebe7819399d4cd264c87de71f23b2bc9338c55e5ae0c8966c2aa7b1ff9202323", size = 34851, upload-time = "2025-09-29T13:30:37.921Z" },
+]
+
+[[package]]
+name = "stashvideohashernode"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -1006,20 +1020,6 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.7.0" },
     { name = "stashapp-tools", specifier = ">=0.2.0" },
     { name = "tqdm", specifier = ">=4.60.0" },
-]
-
-[[package]]
-name = "stashapp-tools"
-version = "0.2.59"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "requests", version = "2.34.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/a8/60680ce6651cb66aa982720366b08ce23237b084078d787f7edfaf023a1c/stashapp-tools-0.2.59.tar.gz", hash = "sha256:639d98b9e587a7c0b616c9c9d3560c064cf83b6cf877b441782b30586afc4a36", size = 32969, upload-time = "2025-09-29T13:30:38.811Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/4d/7262a8dd1f96c012c4b3271453d4c3cbde7caa6b291d18b00553fc6ad64a/stashapp_tools-0.2.59-py3-none-any.whl", hash = "sha256:ebe7819399d4cd264c87de71f23b2bc9338c55e5ae0c8966c2aa7b1ff9202323", size = 34851, upload-time = "2025-09-29T13:30:37.921Z" },
 ]
 
 [[package]]
