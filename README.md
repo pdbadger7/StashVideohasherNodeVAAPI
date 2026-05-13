@@ -1,5 +1,8 @@
 # 📼 StashVideohasherNode (VAAPI)
 
+> **Fork notice (important):** This repository is a **fork** of the original project by **[@Darklyter](https://github.com/Darklyter)**.  
+> **Original repository:** https://github.com/Darklyter/StashVideohasherNodeVAAPI
+
 Got a big Stash library? This script takes the heavy lifting off your Stash server by spreading video processing across as many machines as you want. Each node grabs a batch of unprocessed scenes, does the work, and reports back — with full GPU acceleration to keep things fast.
 
 ## What it does
@@ -71,8 +74,8 @@ This repo now includes a `Dockerfile` that builds on both `linux/amd64` and `lin
 ### Build
 
 ```bash
-docker buildx build --platform linux/amd64 -t stash-videohasher:amd64 .
-docker buildx build --platform linux/arm64 -t stash-videohasher:arm64 .
+docker buildx build --platform linux/amd64 -t StashVideoHasherNode:amd64 .
+docker buildx build --platform linux/arm64 -t StashVideoHasherNode:arm64 .
 ```
 
 ### Run with VAAPI (Intel/AMD on Linux x86 host)
@@ -82,7 +85,7 @@ docker run --rm -it \
   --device /dev/dri:/dev/dri \
   -v "$(pwd)/config.py:/app/config.py:ro" \
   -v /mnt/stash:/mnt/stash \
-  stash-videohasher:amd64 --health-check
+  StashVideoHasherNode:amd64 --health-check
 ```
 
 ### Apple M-Series note
