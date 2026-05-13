@@ -6,6 +6,7 @@ on:
       - main
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -72,3 +73,19 @@ jobs:
           git add pyproject.toml
           git commit -m "chore: bump version to ${new_version}"
           git push origin main
+
+      - name: Trigger Docker publish workflow
+        if: steps.detect.outputs.should_bump == 'true'
+        uses: peter-evans/workflow-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: docker-image.yml
+          ref: main
+
+      - name: Trigger PyPI publish workflow
+        if: steps.detect.outputs.should_bump == 'true'
+        uses: peter-evans/workflow-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: pypi-publish.yml
+          ref: main
