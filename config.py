@@ -28,8 +28,8 @@ binary         = binary_windows if windows else binary_linux
 # ─────────────────────────────────────────────
 # External Tool Paths
 # ─────────────────────────────────────────────
-ffmpeg  = r"c:\mediatools\ffmpeg.exe"  if windows else "/usr/bin/ffmpeg"
-ffprobe = r"c:\mediatools\ffprobe.exe" if windows else "/usr/bin/ffprobe"
+ffmpeg  = os.getenv("FFMPEG_BIN", r"c:\mediatools\ffmpeg.exe" if windows else "/usr/bin/ffmpeg")
+ffprobe = os.getenv("FFPROBE_BIN", r"c:\mediatools\ffprobe.exe" if windows else "/usr/bin/ffprobe")
 
 # ─────────────────────────────────────────────
 # Output Paths

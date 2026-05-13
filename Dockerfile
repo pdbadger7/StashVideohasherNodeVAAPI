@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     XDG_CACHE_HOME=/tmp \
     LIBVA_DRIVERS_PATH=/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri \
+    FFMPEG_BIN=/usr/bin/ffmpeg \
+    FFPROBE_BIN=/usr/bin/ffprobe \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1
 
@@ -22,6 +24,10 @@ RUN set -eux; \
     if [ "$arch" = "amd64" ]; then \
         apt-get install -y --no-install-recommends i965-va-driver intel-media-va-driver; \
     fi; \
+    test -x "$FFMPEG_BIN"; \
+    test -x "$FFPROBE_BIN"; \
+    "$FFMPEG_BIN" -version >/dev/null; \
+    "$FFPROBE_BIN" -version >/dev/null; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/

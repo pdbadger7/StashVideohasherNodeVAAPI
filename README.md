@@ -55,6 +55,13 @@ stash-videohasher --health-check
 
 `stash-videohasher` loads `config.py` from your current working directory first, so run it from the folder where your configured `config.py` lives.
 
+After the package is published to PyPI, you can install/run it without cloning this repo:
+
+```bash
+uv tool install stash-videohasher-node-vaapi
+uvx --from stash-videohasher-node-vaapi stash-videohasher --health-check
+```
+
 ---
 
 ## Docker (x86 + ARM64)
