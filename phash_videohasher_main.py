@@ -18,29 +18,6 @@ shutdown_requested = False
 shutdown_event = threading.Event()
 PROGRESS_REFRESH_SECONDS = 1.0
 
-def format_progress_duration(seconds):
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    if seconds < 3600:
-        minutes = int(seconds // 60)
-        remaining_seconds = int(seconds % 60)
-        return f"{minutes}m {remaining_seconds}s"
-
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    return f"{hours}h {minutes}m"
-
-def refresh_batch_progress(progress, total, completed, pending, started_at, last_status=None):
-    if not progress:
-        return
-
-    elapsed = format_progress_duration(time.monotonic() - started_at)
-    status = f"done {completed}/{total} | pending {pending} | elapsed {elapsed}"
-    if last_status:
-        status = f"{status} | last {last_status}"
-    progress.set_postfix_str(status)
-    progress.refresh()
-
 def apply_cli_args(args):
     config.windows = args.windows
     if args.generate_sprite:
@@ -499,7 +476,6 @@ Other useful options:
     from tqdm import tqdm
 
     overall_progress = None
-    last_pending_count = None
     if not standalone_mode and not args.retry_errors:
         initial_pending = get_total_scene_count(include_hashing_tag=True)
         overall_progress = tqdm(
@@ -510,8 +486,6 @@ Other useful options:
             dynamic_ncols=True,
             position=0,
         )
-        overall_progress.set_postfix_str(f"remaining: {initial_pending}")
-        last_pending_count = initial_pending
 
     batch_progress = None
     batch_progress_position = 1 if overall_progress else 0
@@ -760,15 +734,9 @@ Other useful options:
                 batch_progress.refresh()
 
             pending_futures = set(futures)
-            completed_futures = 0
-            batch_started_at = time.monotonic()
-            refresh_batch_progress(
-                batch_progress,
-                len(futures),
-                completed_futures,
-                len(pending_futures),
-                batch_started_at,
-            )
+            batch_progress.refresh()
+            if overall_progress:
+                overall_progress.refresh()
 
             while pending_futures:
                 if shutdown_requested:
@@ -782,18 +750,12 @@ Other useful options:
                     return_when=FIRST_COMPLETED,
                 )
                 if not done_futures:
-                    refresh_batch_progress(
-                        batch_progress,
-                        len(futures),
-                        completed_futures,
-                        len(pending_futures),
-                        batch_started_at,
-                    )
+                    batch_progress.refresh()
+                    if overall_progress:
+                        overall_progress.refresh()
                     continue
 
                 for future in done_futures:
-                    last_status = None
-                    completed_futures += 1
                     if shutdown_requested:
                         progress_safe_print("🛑 Shutdown requested. Cancelling remaining scenes...")
                         executor.shutdown(wait=False, cancel_futures=True)
@@ -803,29 +765,18 @@ Other useful options:
                         result = future.result()
                         if result and result.get('success'):
                             batch_stats.record_success(result.get('elapsed_time'))
-                            last_status = "success"
                         else:
                             batch_stats.record_failure()
-                            last_status = "failed"
                     except TimeoutError:
                         progress_safe_print("⚠️ Scene processing timed out after 10 minutes")
                         batch_stats.record_failure()
-                        last_status = "timeout"
                     except Exception as e:
                         progress_safe_print(f"⚠️ Worker thread error: {e}")
                         batch_stats.record_failure()
-                        last_status = "error"
                     finally:
-                        if batch_progress:
-                            batch_progress.update(1)
-                        refresh_batch_progress(
-                            batch_progress,
-                            len(futures),
-                            completed_futures,
-                            len(pending_futures),
-                            batch_started_at,
-                            last_status,
-                        )
+                        batch_progress.update(1)
+                        if overall_progress:
+                            overall_progress.update(1)
 
                 if shutdown_requested:
                     break
@@ -836,18 +787,12 @@ Other useful options:
 
             if overall_progress:
                 current_pending = get_total_scene_count(include_hashing_tag=True)
-                if last_pending_count is None:
-                    last_pending_count = current_pending
-
-                completed_since_last = max(0, last_pending_count - current_pending)
-                if completed_since_last:
-                    overall_progress.update(completed_since_last)
-
-                # Keep total dynamic to reflect API-observed queue size across nodes.
-                overall_progress.total = max(overall_progress.n, overall_progress.n + current_pending)
-                overall_progress.set_postfix_str(f"remaining: {current_pending}")
+                observed_total = overall_progress.n + current_pending
+                overall_progress.total = max(overall_progress.total or 0, observed_total)
+                observed_completed = max(0, overall_progress.total - current_pending)
+                if observed_completed > overall_progress.n:
+                    overall_progress.update(observed_completed - overall_progress.n)
                 overall_progress.refresh()
-                last_pending_count = current_pending
 
         except KeyboardInterrupt:
             progress_safe_print("🛑 Interrupted by user. Shutting down gracefully...")
