@@ -140,13 +140,28 @@ class PreviewVideoGenerator:
         return clips
 
     def get_start_times(self, video_duration):
-        usable = video_duration - self.skip_seconds - self.clip_length
+        if video_duration <= 0:
+            raise RuntimeError(f"Video duration must be positive, got {video_duration:.1f}s")
+
+        if video_duration <= self.clip_length:
+            if verbose and self.skip_seconds:
+                print(
+                    f"⚠️ Video too short ({video_duration:.1f}s) for skip_seconds={self.skip_seconds}; using full video for preview"
+                )
+            return [0.0]
+
+        effective_skip_seconds = self.skip_seconds
+        usable = video_duration - effective_skip_seconds - self.clip_length
         if usable <= 0:
-            raise RuntimeError(
-                f"Video too short ({video_duration:.1f}s) for skip_seconds={self.skip_seconds} + clip_length={self.clip_length}"
-            )
+            effective_skip_seconds = 0
+            usable = video_duration - self.clip_length
+            if verbose and self.skip_seconds:
+                print(
+                    f"⚠️ Video too short ({video_duration:.1f}s) for skip_seconds={self.skip_seconds}; using skip_seconds=0 for preview"
+                )
+
         interval = usable / (self.num_clips + 1)
-        return [self.skip_seconds + interval * i for i in range(1, self.num_clips + 1)]
+        return [effective_skip_seconds + interval * i for i in range(1, self.num_clips + 1)]
 
     def concatenate_clips(self, clips):
         missing = [clip for clip in clips if not os.path.exists(clip)]

@@ -8,7 +8,7 @@ import threading
 import subprocess
 import signal
 import sys
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError, wait
 
 import config
 from helpers.config_loader import ConfigError
@@ -16,6 +16,30 @@ from helpers.config_loader import ConfigError
 # Global shutdown flag and event for signal handling
 shutdown_requested = False
 shutdown_event = threading.Event()
+PROGRESS_REFRESH_SECONDS = 1.0
+
+def format_progress_duration(seconds):
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
+        return f"{minutes}m {remaining_seconds}s"
+
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    return f"{hours}h {minutes}m"
+
+def refresh_batch_progress(progress, total, completed, pending, started_at, last_status=None):
+    if not progress:
+        return
+
+    elapsed = format_progress_duration(time.monotonic() - started_at)
+    status = f"done {completed}/{total} | pending {pending} | elapsed {elapsed}"
+    if last_status:
+        status = f"{status} | last {last_status}"
+    progress.set_postfix_str(status)
+    progress.refresh()
 
 def apply_cli_args(args):
     config.windows = args.windows
@@ -490,15 +514,7 @@ Other useful options:
         last_pending_count = initial_pending
 
     batch_progress = None
-    if not standalone_mode:
-        batch_progress = tqdm(
-            total=0,
-            desc="📦 Processing Batch",
-            unit="scene",
-            leave=True,
-            dynamic_ncols=True,
-            position=1 if overall_progress else 0,
-        )
+    batch_progress_position = 1 if overall_progress else 0
 
     if standalone_mode:
 
@@ -729,32 +745,90 @@ Other useful options:
             for index, scene in enumerate(scenes, start=1):
                 futures.append(executor.submit(process_scene, scene, index, total_batch, vaapi_supported, vaapi_device, videotoolbox_supported))
 
-            # Reuse one sticky batch progress bar across all batches.
-            if batch_progress:
+            # Create the batch bar only once the batch size is known, then reuse it.
+            if not batch_progress:
+                batch_progress = tqdm(
+                    total=len(futures),
+                    desc="📦 Processing Batch",
+                    unit="scene",
+                    leave=True,
+                    dynamic_ncols=True,
+                    position=batch_progress_position,
+                )
+            else:
                 batch_progress.reset(total=len(futures))
                 batch_progress.refresh()
 
-            for future in futures:
+            pending_futures = set(futures)
+            completed_futures = 0
+            batch_started_at = time.monotonic()
+            refresh_batch_progress(
+                batch_progress,
+                len(futures),
+                completed_futures,
+                len(pending_futures),
+                batch_started_at,
+            )
+
+            while pending_futures:
                 if shutdown_requested:
                     progress_safe_print("🛑 Shutdown requested. Cancelling remaining scenes...")
                     executor.shutdown(wait=False, cancel_futures=True)
                     break
 
-                try:
-                    result = future.result(timeout=600)  # 10 minute timeout per scene
-                    if result and result.get('success'):
-                        batch_stats.record_success(result.get('elapsed_time'))
-                    else:
+                done_futures, pending_futures = wait(
+                    pending_futures,
+                    timeout=PROGRESS_REFRESH_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+                if not done_futures:
+                    refresh_batch_progress(
+                        batch_progress,
+                        len(futures),
+                        completed_futures,
+                        len(pending_futures),
+                        batch_started_at,
+                    )
+                    continue
+
+                for future in done_futures:
+                    last_status = None
+                    completed_futures += 1
+                    if shutdown_requested:
+                        progress_safe_print("🛑 Shutdown requested. Cancelling remaining scenes...")
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
+                    try:
+                        result = future.result()
+                        if result and result.get('success'):
+                            batch_stats.record_success(result.get('elapsed_time'))
+                            last_status = "success"
+                        else:
+                            batch_stats.record_failure()
+                            last_status = "failed"
+                    except TimeoutError:
+                        progress_safe_print("⚠️ Scene processing timed out after 10 minutes")
                         batch_stats.record_failure()
-                except TimeoutError:
-                    progress_safe_print("⚠️ Scene processing timed out after 10 minutes")
-                    batch_stats.record_failure()
-                except Exception as e:
-                    progress_safe_print(f"⚠️ Worker thread error: {e}")
-                    batch_stats.record_failure()
-                finally:
-                    if batch_progress:
-                        batch_progress.update(1)
+                        last_status = "timeout"
+                    except Exception as e:
+                        progress_safe_print(f"⚠️ Worker thread error: {e}")
+                        batch_stats.record_failure()
+                        last_status = "error"
+                    finally:
+                        if batch_progress:
+                            batch_progress.update(1)
+                        refresh_batch_progress(
+                            batch_progress,
+                            len(futures),
+                            completed_futures,
+                            len(pending_futures),
+                            batch_started_at,
+                            last_status,
+                        )
+
+                if shutdown_requested:
+                    break
 
             # Batch statistics summary remains part of detailed/verbose output
             if config.verbose:
