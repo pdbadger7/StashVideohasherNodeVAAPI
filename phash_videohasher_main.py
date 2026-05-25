@@ -1,6 +1,7 @@
 # main.py
 
 import argparse
+import atexit
 import os
 import shutil
 import time
@@ -12,7 +13,11 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError
 
 import config
 from helpers.config_loader import ConfigError
-from helpers.generated_media import transfer_generated_files
+from helpers.generated_media import (
+    cleanup_generated_staging_dirs,
+    prepare_generated_staging_dirs,
+    transfer_generated_files,
+)
 
 # Global shutdown flag and event for signal handling
 shutdown_requested = False
@@ -385,6 +390,9 @@ Other useful options:
     if not args.no_auto_setup:
         from helpers.setup_autofill import autofill_missing_setup
         autofill_missing_setup(verbose=config.verbose)
+
+    prepare_generated_staging_dirs(verbose=config.verbose)
+    atexit.register(cleanup_generated_staging_dirs, verbose=config.verbose)
 
     # Hardware encoder resolution (evaluated once at startup)
     from datetime import datetime

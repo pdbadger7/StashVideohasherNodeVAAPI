@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "StashVideoHasherNode"
-version = "0.3.10"
+version = "0.3.11"
 description = "Distributed Stash videohasher worker with VAAPI/NVENC/VideoToolbox support."
 readme = "README.md"
 requires-python = ">=3.8"

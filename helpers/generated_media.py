@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import shutil
 
 import config
@@ -34,6 +35,28 @@ def generated_media_path(staging_base, stash_subdir, filename):
     return os.path.normpath(os.path.join(staging_base, filename))
 
 
+def prepare_generated_staging_dirs(verbose=False):
+    """Create configured generated-media staging directories at startup."""
+    for path in _configured_staging_paths():
+        os.makedirs(path, exist_ok=True)
+        if verbose:
+            print(f"📁 Prepared generated-media staging directory: {path}")
+
+
+def cleanup_generated_staging_dirs(verbose=False):
+    """Remove temporary generated-media staging directories at process exit."""
+    for path in sorted(_temporary_staging_paths(), key=len, reverse=True):
+        if not _safe_to_remove(path):
+            if verbose:
+                print(f"⚠️ Skipping unsafe generated-media cleanup path: {path}")
+            continue
+        if not os.path.exists(path):
+            continue
+        shutil.rmtree(path)
+        if verbose:
+            print(f"🧹 Cleaned generated-media staging directory: {path}")
+
+
 def transfer_generated_files(file_paths, staging_base, stash_subdir, verbose=False):
     """
     Move generated files from the configured staging area into translated Stash
@@ -62,21 +85,42 @@ def transfer_generated_files(file_paths, staging_base, stash_subdir, verbose=Fal
         if verbose:
             print(f"📦 Moved generated media to Stash storage: {destination}")
 
-        _remove_empty_staging_parents(os.path.dirname(source), staging_base)
-
     return final_paths
 
 
-def _remove_empty_staging_parents(path, staging_base):
-    path = os.path.normpath(os.path.abspath(path))
-    staging_base = os.path.normpath(os.path.abspath(staging_base))
+def _configured_staging_paths():
+    paths = []
+    for path in (config.sprite_path, config.preview_path, config.marker_path):
+        if not isinstance(path, str) or not path.strip():
+            continue
+        normalized = os.path.normpath(os.path.abspath(path))
+        if normalized not in paths:
+            paths.append(normalized)
+    return paths
 
-    while os.path.commonpath([path, staging_base]) == staging_base:
-        try:
-            os.rmdir(path)
-        except OSError:
-            break
 
-        if path == staging_base:
-            break
-        path = os.path.dirname(path)
+def _temporary_staging_paths():
+    paths = []
+    mapping = (
+        (config.sprite_path, "vtt"),
+        (config.preview_path, "screenshots"),
+        (config.marker_path, ""),
+    )
+    for staging_base, stash_subdir in mapping:
+        if not isinstance(staging_base, str) or not staging_base.strip():
+            continue
+        staging_base = os.path.normpath(os.path.abspath(staging_base))
+        final_probe = os.path.normpath(os.path.abspath(generated_media_path(staging_base, stash_subdir, ".probe")))
+        staging_probe = os.path.normpath(os.path.abspath(os.path.join(staging_base, ".probe")))
+        if os.path.normcase(final_probe) != os.path.normcase(staging_probe) and staging_base not in paths:
+            paths.append(staging_base)
+    return paths
+
+
+def _safe_to_remove(path):
+    path_obj = Path(path).expanduser().resolve()
+    if str(path_obj) == path_obj.anchor:
+        return False
+    if path_obj == Path.home().resolve():
+        return False
+    return len(path_obj.parts) >= 4

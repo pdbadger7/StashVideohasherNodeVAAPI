@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-05-25
+
+### Fixed
+- Create generated-media staging directories at startup so missing local staging paths do not abort processing.
+- Keep staging directories in place while jobs are running; generated-media staging cleanup now happens only when the process exits.
+
 ## [0.3.10] - 2026-05-25
 
 ### Fixed
