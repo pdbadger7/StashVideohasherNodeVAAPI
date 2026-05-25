@@ -707,6 +707,7 @@ Other useful options:
             break
 
         clean_temp_dirs()
+        pending_before_batch = get_total_scene_count(include_hashing_tag=True)
 
         # Get scenes to process (retry errors or normal discovery)
         if args.retry_errors:
@@ -819,14 +820,28 @@ Other useful options:
             if config.verbose:
                 progress_safe_print(batch_stats.get_summary())
 
+            pending_after_batch = get_total_scene_count(include_hashing_tag=True)
             if overall_progress:
-                current_pending = get_total_scene_count(include_hashing_tag=True)
-                observed_total = overall_progress.n + current_pending
-                overall_progress.total = max(overall_progress.total or 0, observed_total)
-                observed_completed = max(0, overall_progress.total - current_pending)
-                if observed_completed > overall_progress.n:
-                    overall_progress.update(observed_completed - overall_progress.n)
                 overall_progress.refresh()
+
+            if (
+                not args.retry_errors
+                and not shutdown_requested
+                and pending_after_batch >= pending_before_batch
+            ):
+                progress_safe_print(
+                    "⚠️ Pending scene count did not decrease after this batch; stopping to avoid an infinite work loop."
+                )
+                progress_safe_print(
+                    f"   Pending before batch: {pending_before_batch}; pending after batch: {pending_after_batch}."
+                )
+                clean_temp_dirs(recreate=False)
+                reset_terminal()
+                if batch_progress:
+                    batch_progress.close()
+                if overall_progress:
+                    overall_progress.close()
+                break
 
         except KeyboardInterrupt:
             progress_safe_print("🛑 Interrupted by user. Shutting down gracefully...")

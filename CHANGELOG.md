@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-05-25
+
+### Fixed
+- Stop mutating the overall tqdm total after each batch; the total now remains the initial pending count for the run.
+- Exit the processing loop when a completed batch does not reduce the pending scene count, preventing infinite rediscovery loops.
+
 ## [0.3.11] - 2026-05-25
 
 ### Fixed
