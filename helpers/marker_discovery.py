@@ -1,7 +1,8 @@
 # marker_discovery.py
 
 import os
-from helpers.stash_utils import stash
+from helpers.generated_media import generated_media_path
+from helpers.stash_utils import is_scene_failed_this_run, stash
 import config
 
 _PAGE_SIZE = 100
@@ -61,6 +62,8 @@ def discover_missing_markers(limit=None):
 
             if not scene_id:
                 continue
+            if is_scene_failed_this_run(scene_id):
+                continue
 
             oshash = None
             video_path = None
@@ -80,18 +83,20 @@ def discover_missing_markers(limit=None):
             if config.excluded_paths and any(video_path.startswith(ep) for ep in config.excluded_paths):
                 continue
 
-            marker_dir = os.path.join(config.marker_path, "markers", oshash)
             sec_int = int(seconds)
 
             needs_generation = False
             if config.marker_preview_enabled:
-                if not os.path.exists(os.path.join(marker_dir, f"{sec_int}.mp4")):
+                marker_file = generated_media_path(config.marker_path, "", os.path.join("markers", oshash, f"{sec_int}.mp4"))
+                if not os.path.exists(marker_file):
                     needs_generation = True
             if config.marker_thumbnail_enabled:
-                if not os.path.exists(os.path.join(marker_dir, f"{sec_int}.webp")):
+                marker_file = generated_media_path(config.marker_path, "", os.path.join("markers", oshash, f"{sec_int}.webp"))
+                if not os.path.exists(marker_file):
                     needs_generation = True
             if config.marker_screenshot_enabled:
-                if not os.path.exists(os.path.join(marker_dir, f"{sec_int}.jpg")):
+                marker_file = generated_media_path(config.marker_path, "", os.path.join("markers", oshash, f"{sec_int}.jpg"))
+                if not os.path.exists(marker_file):
                     needs_generation = True
 
             if not needs_generation:

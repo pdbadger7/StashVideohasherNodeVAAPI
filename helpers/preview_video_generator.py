@@ -261,16 +261,19 @@ class PreviewVideoGenerator:
         clips = self.generate_clips()
         if not clips:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ No clips generated for scene {self.scene_id} — {self.scene_name}")
-            return
+            return False
         try:
             self.concatenate_clips(clips)
             elapsed = time.time() - start
             if os.path.exists(self.output_path):
                 if verbose:
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Preview video created for ID {self.scene_id} — {self.scene_name} → {self.output_path} in {elapsed:.2f} seconds.")
+                return True
             else:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Preview video not created for ID {self.scene_id} — {self.scene_name}")
+                return False
         except Exception as e:
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ❌ Preview generation failed for scene {self.scene_id} — {self.scene_name}: {e}")
+            return False
         finally:
             self.clean_previous_clips()

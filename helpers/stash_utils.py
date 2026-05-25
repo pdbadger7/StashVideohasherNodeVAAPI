@@ -22,6 +22,18 @@ stash = StashInterface(stash_config)
 
 # Thread-safe error logging
 error_log_lock = threading.Lock()
+failed_scene_lock = threading.Lock()
+failed_scene_ids_this_run = set()
+
+
+def mark_scene_failed_this_run(scene_id):
+    with failed_scene_lock:
+        failed_scene_ids_this_run.add(str(scene_id))
+
+
+def is_scene_failed_this_run(scene_id):
+    with failed_scene_lock:
+        return str(scene_id) in failed_scene_ids_this_run
 
 def progress_safe_print(message):
     """Print in a way that cooperates with active tqdm bars."""
@@ -84,7 +96,7 @@ def get_total_scene_count(include_hashing_tag=False):
         "tags": {"value": excluded_tags, "modifier": "EXCLUDES"}
     }
 
-    needs_path_filter = bool(config.excluded_paths or config.filemask)
+    needs_path_filter = bool(config.excluded_paths or config.filemask or failed_scene_ids_this_run)
     if needs_path_filter:
         # Need file paths to apply excluded_paths/filemask filters client-side.
         scenes = stash.find_scenes(
@@ -94,6 +106,8 @@ def get_total_scene_count(include_hashing_tag=False):
         )
         total = 0
         for scene in scenes:
+            if is_scene_failed_this_run(scene.get('id')):
+                continue
             files = scene.get('files') or []
             if not files:
                 continue
@@ -115,11 +129,19 @@ def get_total_scene_count(include_hashing_tag=False):
     return count
 
 def tag_scene_error(scene_id, error_tag, error_msg=None):
+    mark_scene_failed_this_run(scene_id)
     if config.dry_run:
         print(f"[DRY RUN] Would tag scene {scene_id} with error tag {error_tag}")
-        return
-    stash.update_scenes({"ids": [scene_id], "tag_ids": {"ids": error_tag, "mode": "ADD"}})
-    stash.update_scenes({"ids": [scene_id], "tag_ids": {"ids": config.hashing_tag, "mode": "REMOVE"}})
+        return True
+
+    tagged = True
+    try:
+        stash.update_scenes({"ids": [scene_id], "tag_ids": {"ids": error_tag, "mode": "ADD"}})
+        stash.update_scenes({"ids": [scene_id], "tag_ids": {"ids": config.hashing_tag, "mode": "REMOVE"}})
+    except Exception as tag_err:
+        tagged = False
+        print(f"⚠️ Failed to apply error tag {error_tag} to scene {scene_id}; suppressing retry for this run: {tag_err}")
+
     if error_msg:
         # Thread-safe error logging
         try:
@@ -130,6 +152,7 @@ def tag_scene_error(scene_id, error_tag, error_msg=None):
                     log.write(f"[{timestamp}] Scene {scene_id}: {error_msg}\n")
         except Exception as log_err:
             print(f"⚠️ Failed to write {config.error_log_path}: {log_err}")
+    return tagged
 
 def claim_scene(scene_id):
     if config.dry_run:

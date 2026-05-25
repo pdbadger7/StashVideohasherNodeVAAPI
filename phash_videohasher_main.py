@@ -12,6 +12,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError
 
 import config
 from helpers.config_loader import ConfigError
+from helpers.generated_media import transfer_generated_files
 
 # Global shutdown flag and event for signal handling
 shutdown_requested = False
@@ -109,7 +110,7 @@ def process_sprite(scene_data, index, total, vaapi_supported, vaapi_device):
     import time
     from datetime import datetime
     from helpers.video_sprite_generator import VideoSpriteGenerator
-    from helpers.stash_utils import log_scene_failure
+    from helpers.stash_utils import log_scene_failure, mark_scene_failed_this_run
 
     start_time = time.time()
     scene_id = scene_data['scene_id']
@@ -123,12 +124,19 @@ def process_sprite(scene_data, index, total, vaapi_supported, vaapi_device):
     vtt_file = os.path.join(config.sprite_path, f"{oshash}_thumbs.vtt")
 
     try:
+        os.makedirs(config.sprite_path, exist_ok=True)
         generator = VideoSpriteGenerator(
             scene_data['video_path'], sprite_file, vtt_file, oshash,
             config.ffmpeg, config.ffprobe,
             use_vaapi=vaapi_supported, vaapi_device=vaapi_device
         )
         generator.generate_sprite()
+        transfer_generated_files(
+            [sprite_file, vtt_file],
+            config.sprite_path,
+            "vtt",
+            verbose=config.verbose,
+        )
         elapsed = time.time() - start_time
 
         if config.verbose:
@@ -137,6 +145,7 @@ def process_sprite(scene_data, index, total, vaapi_supported, vaapi_device):
 
     except Exception as e:
         elapsed = time.time() - start_time
+        mark_scene_failed_this_run(scene_id)
         log_scene_failure(scene_id, scene_title, "sprite generation", str(e))
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
@@ -145,7 +154,7 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device, vid
     import time
     from datetime import datetime
     from helpers.preview_video_generator import PreviewVideoGenerator
-    from helpers.stash_utils import log_scene_failure
+    from helpers.stash_utils import log_scene_failure, mark_scene_failed_this_run
 
     start_time = time.time()
     scene_id = scene_data['scene_id']
@@ -158,6 +167,7 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device, vid
     preview_file = os.path.join(config.preview_path, f"{oshash}.mp4")
 
     try:
+        os.makedirs(config.preview_path, exist_ok=True)
         generator = PreviewVideoGenerator(
             scene_data['video_path'], preview_file, oshash,
             ffmpeg=config.ffmpeg, ffprobe=config.ffprobe,
@@ -170,7 +180,14 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device, vid
             use_videotoolbox=videotoolbox_supported,
             videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
         )
-        generator.generate_preview()
+        if not generator.generate_preview():
+            raise RuntimeError(f"Preview video not created: {preview_file}")
+        transfer_generated_files(
+            [preview_file],
+            config.preview_path,
+            "screenshots",
+            verbose=config.verbose,
+        )
         elapsed = time.time() - start_time
 
         if config.verbose:
@@ -179,6 +196,7 @@ def process_preview(scene_data, index, total, vaapi_supported, vaapi_device, vid
 
     except Exception as e:
         elapsed = time.time() - start_time
+        mark_scene_failed_this_run(scene_id)
         log_scene_failure(scene_id, scene_title, "preview generation", str(e))
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
@@ -187,7 +205,7 @@ def process_marker(marker_data, index, total, vaapi_supported, vaapi_device, vid
     import time
     from datetime import datetime
     from helpers.marker_generator import MarkerGenerator
-    from helpers.stash_utils import log_marker_failure
+    from helpers.stash_utils import log_marker_failure, mark_scene_failed_this_run
 
     start_time = time.time()
     marker_id = marker_data['marker_id']
@@ -219,16 +237,24 @@ def process_marker(marker_data, index, total, vaapi_supported, vaapi_device, vid
         elapsed = time.time() - start_time
 
         if result['success']:
+            result['files'] = transfer_generated_files(
+                result['files'],
+                config.marker_path,
+                "",
+                verbose=config.verbose,
+            )
             files_str = ', '.join([os.path.basename(f) for f in result['files']])
             if config.verbose:
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] ✅ Generated {files_str} in {elapsed:.2f}s")
             return {'success': True, 'elapsed_time': elapsed, 'marker_id': marker_id}
         else:
+            mark_scene_failed_this_run(scene_id)
             log_marker_failure(marker_id, marker_title, "generation", result.get('error', 'Unknown'))
             return {'success': False, 'elapsed_time': elapsed, 'marker_id': marker_id}
 
     except Exception as e:
         elapsed = time.time() - start_time
+        mark_scene_failed_this_run(scene_id)
         log_marker_failure(marker_id, marker_title, "generation", str(e))
         return {'success': False, 'elapsed_time': elapsed, 'marker_id': marker_id}
 

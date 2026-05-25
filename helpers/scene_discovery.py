@@ -3,7 +3,7 @@
 import random
 import os
 from fnmatch import fnmatch
-from helpers.stash_utils import stash, progress_safe_print
+from helpers.stash_utils import stash, progress_safe_print, is_scene_failed_this_run
 import config
 
 def discover_scenes():
@@ -28,6 +28,9 @@ def discover_scenes():
 
     # Step 2: Count total matching scenes
     total_count = len(all_scenes)
+    if total_count:
+        all_scenes = [s for s in all_scenes if not is_scene_failed_this_run(s.get('id'))]
+        total_count = len(all_scenes)
     if total_count == 0:
         print("🚫 No scenes found to process.")
         return []
@@ -56,6 +59,8 @@ def discover_scenes():
         },
         fragment="id files{id path fingerprints{value type}} paths{screenshot}"
     )
+    if batch_scenes:
+        batch_scenes = [s for s in batch_scenes if not is_scene_failed_this_run(s.get('id'))]
 
     # Step 6: Apply excluded_paths filter if specified
     if config.excluded_paths:

@@ -11,6 +11,7 @@ from datetime import datetime
 from helpers.video_sprite_generator import VideoSpriteGenerator
 from helpers.preview_video_generator import PreviewVideoGenerator
 from helpers.phash_generator import compute_phash
+from helpers.generated_media import generated_media_path, transfer_generated_files
 
 from config import (
     windows, binary, ffmpeg, ffprobe,
@@ -77,9 +78,10 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
         elapsed = time.time() - start_time
         return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
-    claim_scene(scene_id)
-
+    claimed = False
     try:
+        claim_scene(scene_id)
+        claimed = True
         performed_options = []
 
         if config.debug:
@@ -159,8 +161,10 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
         if config.generate_sprite:
             sprite_file = os.path.join(sprite_path, f"{filehash}_sprite.jpg")
             vtt_file = os.path.join(sprite_path, f"{filehash}_thumbs.vtt")
+            final_sprite_file = generated_media_path(sprite_path, "vtt", f"{filehash}_sprite.jpg")
+            final_vtt_file = generated_media_path(sprite_path, "vtt", f"{filehash}_thumbs.vtt")
             encoder_note = "VAAPI" if vaapi_supported else "software"
-            if not os.path.exists(sprite_file):
+            if not os.path.exists(final_sprite_file) or not os.path.exists(final_vtt_file):
                 if config.debug:
                     print(f"🟡 [DEBUG] Starting sprite generation for {filename_pretty}")
                     print(f"🟡 [DEBUG] VideoSpriteGenerator: 81 frames × {encoder_note} extraction → PIL assembly → {sprite_file}")
@@ -173,6 +177,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                         print(f"🟡 [DEBUG] Finished sprite generation for {filename_pretty} in {sprite_elapsed:.2f} seconds")
                 else:
                     try:
+                        os.makedirs(sprite_path, exist_ok=True)
                         if not config.debug:
                             sprite_start = time.time()
                         generator = VideoSpriteGenerator(
@@ -180,6 +185,12 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             use_vaapi=vaapi_supported, vaapi_device=vaapi_device
                         )
                         generator.generate_sprite()
+                        transfer_generated_files(
+                            [sprite_file, vtt_file],
+                            sprite_path,
+                            "vtt",
+                            verbose=config.verbose,
+                        )
                         sprite_elapsed = time.time() - sprite_start
                         performed_options.append("sprite")
                         if config.verbose:
@@ -192,7 +203,8 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
 
         if config.generate_preview:
             preview_file = os.path.join(preview_path, f"{filehash}.mp4")
-            if not os.path.exists(preview_file):
+            final_preview_file = generated_media_path(preview_path, "screenshots", f"{filehash}.mp4")
+            if not os.path.exists(final_preview_file):
                 if config.debug:
                     print(f"🟡 [DEBUG] Starting preview generation for {filename_pretty}")
                     preview_start = time.time()
@@ -204,6 +216,7 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                         print(f"🟡 [DEBUG] Finished preview generation for {filename_pretty} in {preview_elapsed:.2f} seconds")
                 else:
                     try:
+                        os.makedirs(preview_path, exist_ok=True)
                         if vaapi_supported:
                             vaapi_used = True
                             performed_options.append("preview (vaapi)")
@@ -218,7 +231,14 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                             use_videotoolbox=videotoolbox_supported,
                             videotoolbox_codec=getattr(config, 'videotoolbox_codec', 'h264'),
                         )
-                        generator.generate_preview()
+                        if not generator.generate_preview():
+                            raise RuntimeError(f"Preview video not created: {preview_file}")
+                        transfer_generated_files(
+                            [preview_file],
+                            preview_path,
+                            "screenshots",
+                            verbose=config.verbose,
+                        )
                         preview_elapsed = time.time() - preview_start
                         if not vaapi_used:
                             performed_options.append("preview")
@@ -272,6 +292,12 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
                                     result = generator.generate_marker()
 
                                     if result['success']:
+                                        result['files'] = transfer_generated_files(
+                                            result['files'],
+                                            config.marker_path,
+                                            "",
+                                            verbose=config.verbose,
+                                        )
                                         files_str = ', '.join([os.path.basename(f) for f in result['files']])
                                         performed_options.append(f"marker {marker_id}")
                                         if config.verbose:
@@ -295,5 +321,11 @@ def process_scene(scene, index=None, total_batch=None, vaapi_supported=False, va
 
         return {'success': success, 'elapsed_time': elapsed, 'scene_id': scene_id}
 
+    except Exception as e:
+        elapsed = time.time() - start_time
+        log_scene_failure(scene_id, filename_pretty, "unexpected processing", e)
+        tag_scene_error(scene_id, config.hashing_error_tag, str(e))
+        return {'success': False, 'elapsed_time': elapsed, 'scene_id': scene_id}
     finally:
-        release_scene(scene_id)
+        if claimed:
+            release_scene(scene_id)

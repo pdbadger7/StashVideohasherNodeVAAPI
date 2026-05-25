@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-05-25
+
+### Fixed
+- Move generated previews, sprites, VTT files, and marker media from local staging paths into translated Stash generated-media storage after successful generation.
+- Check translated Stash generated-media destinations during standalone discovery so existing injected media is not regenerated.
+- Suppress failed scenes for the rest of the current run, even when applying the Stash error tag fails, preventing repeated retries and progress totals that grow indefinitely.
+
 ## [1.3.0] - 2026-04-03
 
 ### Added

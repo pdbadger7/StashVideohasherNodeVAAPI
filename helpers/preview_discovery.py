@@ -1,7 +1,8 @@
 # preview_discovery.py
 
 import os
-from helpers.stash_utils import stash
+from helpers.generated_media import generated_media_path
+from helpers.stash_utils import is_scene_failed_this_run, stash
 import config
 
 _PAGE_SIZE = 100
@@ -43,6 +44,8 @@ def discover_missing_previews(limit=None):
 
         for scene in scenes:
             scene_id = scene['id']
+            if is_scene_failed_this_run(scene_id):
+                continue
             scene_title = scene.get('title', f"Scene {scene_id}")
 
             oshash = None
@@ -67,7 +70,7 @@ def discover_missing_previews(limit=None):
             if config.excluded_paths and any(video_path.startswith(ep) for ep in config.excluded_paths):
                 continue
 
-            preview_file = os.path.join(config.preview_path, f"{oshash}.mp4")
+            preview_file = generated_media_path(config.preview_path, "screenshots", f"{oshash}.mp4")
 
             if not os.path.exists(preview_file):
                 translated_path = translate_path(video_path)
